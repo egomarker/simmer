@@ -13,6 +13,7 @@ from typing import Optional
 
 import AppKit
 import Quartz
+import CoreFoundation
 
 from .backend_base import SimDevice
 from .backend_ios import press_home
@@ -130,7 +131,16 @@ def capture(udid: str, quality: int = 70) -> Optional[bytes]:
             {AppKit.NSImageCompressionFactor: quality / 100.0},
         )
 
-        return bytes(jpeg_data) if jpeg_data is not None else None
+        if jpeg_data is None:
+            return None
+
+        length = CoreFoundation.CFDataGetLength(jpeg_data)
+        ptr = CoreFoundation.CFDataGetBytePtr(jpeg_data)
+        view = ptr.as_buffer(length)
+        try:
+            return view.tobytes()
+        finally:
+            del view
 
     finally:
         del pool

@@ -64,6 +64,7 @@ class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
         try:
             import AppKit
             import Quartz
+            import CoreFoundation
 
             wid = self._window_id(udid)
             if wid is not None:
@@ -84,7 +85,13 @@ class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
                         {AppKit.NSImageCompressionFactor: max(0, min(100, quality)) / 100.0},
                     )
                     if jpeg:
-                        return bytes(jpeg)
+                        length = CoreFoundation.CFDataGetLength(jpeg)
+                        ptr = CoreFoundation.CFDataGetBytePtr(jpeg)
+                        view = ptr.as_buffer(length)
+                        try:
+                            return view.tobytes()
+                        finally:
+                            del view
         except Exception as exc:
             # A missing/disappearing window should never make streaming fail.
             print(f"[android-quartz] fallback to ADB: {exc}", flush=True)
