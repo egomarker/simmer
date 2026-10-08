@@ -47,7 +47,11 @@ def _select_backend(mode: str):
     if has_adb():
         from . import backend_adb
 
-        backends.append(backend_adb.AdbBackend())
+        if mode == "fast" or (mode == "auto" and getattr(ios, "name", "") == "fast (Quartz)"):
+            from .backend_android_quartz import AndroidQuartzBackend
+            backends.append(AndroidQuartzBackend())
+        else:
+            backends.append(backend_adb.AdbBackend())
     else:
         print("Android emulators: install Android Studio for adb support")
 
