@@ -12,8 +12,10 @@ from typing import Optional
 from .backend_adb import AdbBackend
 
 
-class AndroidQuartzBackend(AdbBackend):
-    name = "android (Quartz capture + adb input)"
+from .backend_android_input_quartz import QuartzInputMixin
+
+class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
+    name = "android (Quartz capture + Quartz touch + adb controls)"
 
     def __init__(self) -> None:
         # Serial -> (window ID, timestamp). Discovery is comparatively cheap,
