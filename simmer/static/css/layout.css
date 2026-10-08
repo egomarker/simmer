@@ -273,6 +273,44 @@ html, body {
   font-size: 0;
 }
 
+/* Sidebar toggle on wider screens. Narrow screens keep the existing drawer. */
+@media (min-width: 901px), (min-width: 701px) and (min-height: 481px) {
+  .mobile-menu-btn {
+    display: flex;
+    position: fixed;
+    top: calc(var(--sp-3) + env(safe-area-inset-top, 0px));
+    left: calc(232px + var(--sp-3));
+    z-index: 45;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: rgba(24, 24, 27, 0.9);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    cursor: pointer;
+  }
+  .mobile-menu-btn:hover,
+  .mobile-menu-btn:active {
+    color: var(--text-primary);
+    background: var(--bg-overlay);
+  }
+  #app.sidebar-collapsed #sidebar {
+    width: 0;
+    flex-basis: 0;
+    border-right: 0;
+    padding-left: 0;
+    visibility: hidden;
+  }
+  #app.sidebar-collapsed .mobile-menu-btn {
+    left: calc(var(--sp-3) + env(safe-area-inset-left, 0px));
+  }
+}
+
 @media (max-width: 700px), (max-height: 480px) and (max-width: 900px) {
   #app {
     --sidebar-drawer-width: min(86vw, 340px);

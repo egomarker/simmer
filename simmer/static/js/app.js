@@ -74,29 +74,56 @@ window.visualViewport?.addEventListener('resize', updateViewportVars);
 window.visualViewport?.addEventListener('scroll', updateViewportVars);
 window.addEventListener('resize', updateViewportVars);
 
-// ── Mobile sidebar ───────────────────────────────────────────────────────────
-function setMobileSidebarOpen(open) {
-  app.classList.toggle('sidebar-open', open);
-  mobileMenuBtn.setAttribute('aria-expanded', String(open));
-  mobileMenuBtn.setAttribute('aria-label', open ? 'Close simulator list' : 'Open simulator list');
-}
-
-function closeMobileSidebar() {
-  setMobileSidebarOpen(false);
-}
+// ── Sidebar (drawer on narrow screens, collapsible on desktop) ────────────────
+const SIDEBAR_PREF_KEY = 'simmerDesktopSidebarOpen';
+let desktopSidebarOpen = true;
+try { desktopSidebarOpen = localStorage.getItem(SIDEBAR_PREF_KEY) !== 'false'; } catch {}
 
 function isMobileViewport() {
   return window.matchMedia('(max-width: 700px), (max-height: 480px) and (max-width: 900px)').matches;
 }
 
+function syncSidebarLayout() {
+  const mobile = isMobileViewport();
+  // Preserve mobile drawer state while resizing; never keep its backdrop on desktop.
+  if (mobile) {
+    app.classList.remove('sidebar-collapsed');
+  } else {
+    app.classList.remove('sidebar-open');
+    app.classList.toggle('sidebar-collapsed', !desktopSidebarOpen);
+  }
+  const open = mobile ? app.classList.contains('sidebar-open') : desktopSidebarOpen;
+  mobileMenuBtn.setAttribute('aria-expanded', String(open));
+  mobileMenuBtn.setAttribute('aria-label', open ? 'Hide simulator list' : 'Show simulator list');
+  mobileMenuBtn.title = open ? 'Hide simulator list' : 'Show simulator list';
+}
+
+function setSidebarOpen(open) {
+  if (isMobileViewport()) {
+    app.classList.toggle('sidebar-open', open);
+  } else {
+    desktopSidebarOpen = open;
+    try { localStorage.setItem(SIDEBAR_PREF_KEY, String(open)); } catch {}
+  }
+  syncSidebarLayout();
+}
+
+function closeMobileSidebar() {
+  if (isMobileViewport()) setSidebarOpen(false);
+}
+
 mobileMenuBtn.addEventListener('click', () => {
-  setMobileSidebarOpen(!app.classList.contains('sidebar-open'));
+  const currentlyOpen = isMobileViewport()
+    ? app.classList.contains('sidebar-open')
+    : desktopSidebarOpen;
+  setSidebarOpen(!currentlyOpen);
 });
 sidebarBackdrop.addEventListener('click', closeMobileSidebar);
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeMobileSidebar();
 });
-
+window.addEventListener('resize', syncSidebarLayout);
+syncSidebarLayout();
 // ── Utility ──────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s)

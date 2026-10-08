@@ -134,7 +134,17 @@ def list_available_devices() -> list[dict]:
 
 
 def boot_sim(udid: str) -> None:
-    subprocess.run(["xcrun", "simctl", "boot", udid], capture_output=True, timeout=60)
+    """Boot an iOS device and show its window in Simulator.app."""
+    subprocess.run(
+        ["xcrun", "simctl", "boot", udid],
+        capture_output=True, check=True, timeout=60,
+    )
+    # simctl boots CoreSimulator headlessly. Fast Quartz capture requires a
+    # visible Simulator.app window. Pass the specific UDID to the GUI.
+    subprocess.run(
+        ["open", "-a", "Simulator", "--args", "-CurrentDeviceUDID", udid],
+        capture_output=True, check=True, timeout=15,
+    )
 
 
 def sim_has_app(udid: str, bundle_id: str) -> bool:
