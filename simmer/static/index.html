@@ -12,7 +12,43 @@
   <link rel="stylesheet" href="/css/layout.css">
   <link rel="stylesheet" href="/css/components.css">
   <link rel="stylesheet" href="/css/terminal.css">
+
+  <style>
+  /* Disable double-tap zoom everywhere */
+  html, body, body * {
+    touch-action: manipulation;
+  }
+
+  /* Prevent text selection */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Allow text selection in inputs and terminal */
+  input,
+  textarea,
+  [contenteditable="true"],
+  .xterm {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Preserve native touch handling for simulator */
+  canvas {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+</style>
 </head>
+<script>
+  document.addEventListener('dblclick', e => {
+    e.preventDefault();
+  }, { passive: false });
+</script>
 <body>
 
 <div id="app">
