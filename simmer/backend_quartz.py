@@ -105,24 +105,36 @@ def _find_window(udid: str) -> Optional[dict]:
 # ── Capture ────────────────────────────────────────────────────────────────────
 
 
+
 def capture(udid: str, quality: int = 70) -> Optional[bytes]:
-    win = _find_window(udid)
-    if not win:
-        return None
-    image = Quartz.CGWindowListCreateImage(
-        Quartz.CGRectNull,
-        Quartz.kCGWindowListOptionIncludingWindow,
-        win["wid"],
-        Quartz.kCGWindowImageBoundsIgnoreFraming | Quartz.kCGWindowImageNominalResolution,
-    )
-    if image is None:
-        return None
-    bitmap = AppKit.NSBitmapImageRep.alloc().initWithCGImage_(image)
-    jpeg_data = bitmap.representationUsingType_properties_(
-        AppKit.NSBitmapImageFileTypeJPEG,
-        {AppKit.NSImageCompressionFactor: quality / 100.0},
-    )
-    return bytes(jpeg_data) if jpeg_data is not None else None
+    pool = AppKit.NSAutoreleasePool.alloc().init()
+
+    try:
+        win = _find_window(udid)
+        if not win:
+            return None
+
+        image = Quartz.CGWindowListCreateImage(
+            Quartz.CGRectNull,
+            Quartz.kCGWindowListOptionIncludingWindow,
+            win["wid"],
+            Quartz.kCGWindowImageBoundsIgnoreFraming
+            | Quartz.kCGWindowImageNominalResolution,
+        )
+        if image is None:
+            return None
+
+        bitmap = AppKit.NSBitmapImageRep.alloc().initWithCGImage_(image)
+        jpeg_data = bitmap.representationUsingType_properties_(
+            AppKit.NSBitmapImageFileTypeJPEG,
+            {AppKit.NSImageCompressionFactor: quality / 100.0},
+        )
+
+        return bytes(jpeg_data) if jpeg_data is not None else None
+
+    finally:
+        del pool
+
 
 
 # ── Input injection ────────────────────────────────────────────────────────────

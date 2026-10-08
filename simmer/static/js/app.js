@@ -498,6 +498,7 @@ function addSimPanel(udid, name, w, h) {
   panel.stream = new SimStream(udid, canvasEl, {
     fps:     parseInt(fpsSlider.value),
     quality: parseInt(qualSlider.value),
+    data_saver: dsBtn.classList.contains('active'),
     onStatus:            s => updatePanelStatus(udid, s),
     onFirstFrame:        () => overlayEl.classList.add('hidden'),
     onOrientationChange: () => sizeFrame(panel),
@@ -505,7 +506,7 @@ function addSimPanel(udid, name, w, h) {
     onRotateEnd:         ok => clearPanelProgress(udid, ok ? null : 'Rotate failed'),
     onStats:             stats => updatePanelStats(udid, stats),
   });
-  panel.stream.updateSettings({ data_saver: dsBtn.classList.contains('active') });
+  //panel.stream.updateSettings({ data_saver: dsBtn.classList.contains('active') });
   updateStreamVisibility();
 
   setFocusedPanel(udid);

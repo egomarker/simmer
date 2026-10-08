@@ -290,6 +290,20 @@ async def _run(fn, *args):
     return await loop.run_in_executor(None, fn, *args)
 
 
+def _capture_with_pool(backend, udid: str, quality: int):
+    try:
+        from Foundation import NSAutoreleasePool
+    except ImportError:
+        # Non-macOS backends
+        return backend.capture(udid, quality)
+
+    pool = NSAutoreleasePool.alloc().init()
+    try:
+        return backend.capture(udid, quality)
+    finally:
+        del pool
+
+
 async def _capture(backend: Any, udid: str, quality: int) -> Optional[bytes]:
     """Capture one frame. Skips if a capture for this UDID is already in flight.
 
@@ -309,7 +323,13 @@ async def _capture(backend: Any, udid: str, quality: int) -> Optional[bytes]:
     loop = asyncio.get_running_loop()
     # shield() lets the underlying thread future survive the wait_for timeout
     # so we can attempt to cancel a queued (not-yet-started) task afterward.
-    fut = loop.run_in_executor(_udid_executors[udid], backend.capture, udid, quality)
+    fut = loop.run_in_executor(
+        _udid_executors[udid],
+        _capture_with_pool,
+        backend,
+        udid,
+        quality,
+    )
     try:
         return await asyncio.wait_for(asyncio.shield(fut), timeout=3.0)
     except asyncio.TimeoutError:
@@ -433,6 +453,7 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
         send_failures = 0
         frame_id = 0
         last_stats_at = 0.0
+        last_heartbeat_at = 0.0
         while not ws.closed:
             frame_start = asyncio.get_running_loop().time()
 
@@ -455,9 +476,20 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                         frame = rotated
                 if state["data_saver"]:
                     h = hashlib.md5(frame).hexdigest()
+
                     if h == last_hash[0]:
+                        now = asyncio.get_running_loop().time()
+
+                        # Tell the browser the stream is alive without sending a frame.
+                        if now - last_heartbeat_at >= 8.0:
+                            await ws.send_str(
+                                json.dumps({"type": "frame_heartbeat"})
+                            )
+                            last_heartbeat_at = now
+
                         await asyncio.sleep(1.0 / state["fps"])
                         continue
+
                     last_hash[0] = h
                 try:
                     state["ack_event"].clear()

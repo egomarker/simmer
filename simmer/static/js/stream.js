@@ -2,7 +2,7 @@ const CONNECT_TIMEOUT = 5000;
 const RECONNECT_DELAY = 2000;
 const NO_FRAME_WARN   = 4000;
 const WATCHDOG_POLL   = 3000;
-const WATCHDOG_STALE  = 8000;
+const WATCHDOG_STALE  = 16000;
 const DRAG_THRESHOLD  = 0.015;
 
 export class SimStream {
@@ -20,8 +20,9 @@ export class SimStream {
     udid,
     canvas,
     {
-      fps = 15,
-      quality = 70,
+      fps = 60,
+      quality = 20,
+      data_saver = false,
       onStatus,
       onFirstFrame,
       onOrientationChange,
@@ -42,7 +43,7 @@ export class SimStream {
     this.#onRotateEnd = onRotateEnd ?? (() => {});
     this.#onStats = onStats ?? (() => {});
 
-    this.settings = { fps, quality, data_saver: false, dev_w: canvas.width, dev_h: canvas.height };
+    this.settings = { fps, quality, data_saver, dev_w: canvas.width, dev_h: canvas.height };
 
     this.#setupPointer();
     this.#connect();
@@ -88,7 +89,7 @@ export class SimStream {
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(
-      `${proto}//${location.host}/ws/${this.#udid}?fps=${this.settings.fps}&quality=${this.settings.quality}&w=${this.#portraitW}&h=${this.#portraitH}`
+      `${proto}//${location.host}/ws/${this.#udid}?fps=${this.settings.fps}&quality=${this.settings.quality}&w=${this.#portraitW}&h=${this.#portraitH}&data_saver=${this.settings.data_saver ? 1 : 0}`
     );
     this.#ws = ws;
     ws.binaryType = 'blob';
@@ -127,6 +128,8 @@ export class SimStream {
           const msg = JSON.parse(e.data);
           if (msg.type === 'input_capabilities') {
             this.#liveTouch = msg.live_touch === true;
+          } else if (msg.type === 'frame_heartbeat') {
+            this.#lastFrameAt = Date.now();
           } else if (msg.type === 'rotated') {
             this.#setOrientation(!this.#isLandscape);
             this.#onRotateEnd(true);
