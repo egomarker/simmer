@@ -15,6 +15,7 @@ import subprocess
 import sys as _sys
 import termios
 import uuid
+from collections import deque
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Optional
@@ -420,11 +421,21 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
     _udid_backend = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
     _needs_rotation = "simctl" in getattr(_udid_backend, "name", "")
 
+    live_touch_supported = all(
+        callable(getattr(_udid_backend, name, None))
+        for name in ("touch_down", "touch_move", "touch_up", "touch_cancel")
+    )
+    await ws.send_str(json.dumps({
+        "type": "input_capabilities", "live_touch": live_touch_supported,
+    }))
+
     async def frame_loop() -> None:
         send_failures = 0
         frame_id = 0
         last_stats_at = 0.0
         while not ws.closed:
+            frame_start = asyncio.get_running_loop().time()
+
             if state.get("stream_paused"):
                 await asyncio.sleep(0.25)
                 continue
@@ -453,6 +464,16 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                     state["ack_sent_at"] = asyncio.get_running_loop().time()
                     frame_id += 1
                     await ws.send_bytes(frame)
+
+                    now = asyncio.get_running_loop().time()
+                    prev = state.get("_debug_last_send")
+                    state["_debug_last_send"] = now
+
+                    if prev is not None:
+                        gap_ms = (now - prev) * 1000
+                        if gap_ms > 60:
+                            print(f"[debug] Frame interval: {gap_ms:.1f} ms", flush=True)
+
                     now = asyncio.get_running_loop().time()
                     if now - last_stats_at >= 1.0:
                         last_stats_at = now
@@ -473,9 +494,27 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                     if send_failures >= 3:
                         await _close_ws_quietly(ws)
                         break
-            await asyncio.sleep(1.0 / state["fps"])
+            elapsed = asyncio.get_running_loop().time() - frame_start
+            delay = max(0.0, 1.0 / state["fps"] - elapsed)
+            await asyncio.sleep(delay)
+
+    
+    # Slow simulator gestures must never block WebSocket ACK processing.
+    # Coalesce only adjacent pointer movements; never reorder press/release.
+    input_events: deque[dict] = deque()
+    input_available = asyncio.Event()
+
+    async def input_loop() -> None:
+        while True:
+            await input_available.wait()
+            data = input_events.popleft()
+            if not input_events:
+                input_available.clear()
+            await _handle_input(data, udid, state, backend, ws)
 
     task = asyncio.create_task(frame_loop())
+    input_task = asyncio.create_task(input_loop())
+
     try:
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -483,19 +522,47 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                     data = json.loads(msg.data)
                 except Exception:
                     continue
-                await _handle_input(data, udid, state, backend, ws)
-            elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
+
+                if data.get("type") in (
+                    "tap", "drag", "key", "text",
+                    "home", "rotate", "appearance",
+                    "touch_down", "touch_move", "touch_up",
+                ):
+                    # Record queue wait for existing tap diagnostics.
+                    data["_received_at"] = asyncio.get_running_loop().time()
+                    if (data.get("type") == "touch_move"
+                            and input_events
+                            and input_events[-1].get("type") == "touch_move"):
+                        input_events[-1] = data
+                    else:
+                        input_events.append(data)
+                    input_available.set()
+                else:
+                    # Process ACKs and settings immediately.
+                    await _handle_input(data, udid, state, backend, ws)
+
+            elif msg.type in (
+                aiohttp.WSMsgType.ERROR,
+                aiohttp.WSMsgType.CLOSE,
+            ):
                 break
+
     finally:
-        if _active_sim_ws.get(udid) is ws:
+        was_active = _active_sim_ws.get(udid) is ws
+        if was_active:
             _active_sim_ws.pop(udid, None)
+
         task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        input_task.cancel()
+        await asyncio.gather(task, input_task, return_exceptions=True)
+
+        # Never leave the macOS mouse button held after a disconnect.
+        # If a newer client replaced us, its own gesture owns the mouse.
+        if was_active and live_touch_supported:
+            await _run(_udid_backend.touch_cancel, udid)
 
     return ws
+
 
 
 async def _handle_input(
@@ -532,17 +599,49 @@ async def _handle_input(
         if event is not None:
             event.set()
         if sent_at is not None:
-            _adapt_stream(state, ack_ms=(asyncio.get_running_loop().time() - sent_at) * 1000)
+            ack_ms = (asyncio.get_running_loop().time() - sent_at) * 1000
+
+            if ack_ms > 40:
+                print(f"[debug] ACK latency: {ack_ms:.1f} ms", flush=True)
+
+            _adapt_stream(state, ack_ms=ack_ms)
         return
 
     try:
-        if t == "tap":
+        if t in ("touch_down", "touch_move", "touch_up"):
+            # Use the concrete backend: MultiBackend may not expose touch methods.
+            concrete = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
+            action = getattr(concrete, t, None)
+            if action is None:
+                return
+            x, y = float(data["x"]), float(data["y"])
+            x, y = max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
+            if state.get("forced_landscape"):
+                x, y = _map_for_forced_landscape(x, y)
+            await _run(action, udid, x, y)
+            return
+        elif t == "tap":
             x, y = data["x"], data["y"]
             dev_w, dev_h = state["dev_w"], state["dev_h"]
             if state.get("forced_landscape"):
                 x, y = _map_for_forced_landscape(x, y)
                 dev_w, dev_h = state["dev_h"], state["dev_w"]
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+
+            queue_ms = (
+                started - data.get("_received_at", started)
+            ) * 1000
+
             await _run(backend.tap, udid, x, y, dev_w, dev_h)
+
+            backend_ms = (loop.time() - started) * 1000
+
+            print(
+                f"[tap] queue={queue_ms:.1f}ms "
+                f"backend={backend_ms:.1f}ms",
+                flush=True,
+)
         elif t == "drag":
             x1, y1, x2, y2 = data["x1"], data["y1"], data["x2"], data["y2"]
             dev_w, dev_h = state["dev_w"], state["dev_h"]

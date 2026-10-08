@@ -6,6 +6,7 @@ const WATCHDOG_STALE  = 8000;
 const DRAG_THRESHOLD  = 0.015;
 
 export class SimStream {
+  #liveTouch = false;
   #udid; #canvas; #ctx;
   #ws = null; #connectTimer = null; #reconnectTimer = null; #watchdog = null;
   #lastFrameAt = 0; #firstFrame = false; #frameInFlight = false;
@@ -82,6 +83,7 @@ export class SimStream {
     if (this.#ws) { this.#ws.onclose = null; this.#ws.close(); }
 
     this.#firstFrame = false;
+    this.#liveTouch = false;
     this.#onStatus('connecting');
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -123,7 +125,9 @@ export class SimStream {
       if (typeof e.data === 'string') {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === 'rotated') {
+          if (msg.type === 'input_capabilities') {
+            this.#liveTouch = msg.live_touch === true;
+          } else if (msg.type === 'rotated') {
             this.#setOrientation(!this.#isLandscape);
             this.#onRotateEnd(true);
           } else if (msg.type === 'rotate_failed') {
@@ -136,6 +140,9 @@ export class SimStream {
       }
       if (!(e.data instanceof Blob)) return;
 
+      // Acknowledge receipt immediately, independently of rendering.
+      this.send({ type: 'frame_ack' });
+
       this.#lastFrameAt = Date.now();
       this.#stats.bytes += e.data.size || 0;
       if (!this.#firstFrame) {
@@ -146,27 +153,49 @@ export class SimStream {
       }
       if (this.#frameInFlight) {
         this.#stats.dropped += 1;
-        this.send({ type: 'frame_ack', dropped: true });
+        //this.send({ type: 'frame_ack', dropped: true });
         return;
       }
       this.#frameInFlight = true;
 
-      const url = URL.createObjectURL(e.data);
-      const img = new Image();
-      img.onload = () => {
-        this.#setOrientation(img.naturalWidth > img.naturalHeight);
-        this.#ctx.drawImage(img, 0, 0, this.#canvas.width, this.#canvas.height);
-        this.#stats.frames += 1;
-        URL.revokeObjectURL(url);
+    const started = performance.now();
+
+    createImageBitmap(e.data)
+      .then(bitmap => {
+        const decodeMs = performance.now() - started;
+        const drawStart = performance.now();
+
+        try {
+          this.#setOrientation(bitmap.width > bitmap.height);
+          this.#ctx.drawImage(
+            bitmap, 0, 0,
+            this.#canvas.width,
+            this.#canvas.height
+          );
+          this.#stats.frames += 1;
+
+          if (this.#stats.frames % 30 === 0) {
+            console.log(
+              `Decode: ${decodeMs.toFixed(1)} ms, ` +
+              `Draw: ${(performance.now() - drawStart).toFixed(1)} ms`
+            );
+          }
+
+          //this.send({ type: 'frame_ack' });
+        } catch (err) {
+          console.error('Frame drawing failed:', err);
+          //this.send({ type: 'frame_ack', decode_error: true });
+        } finally {
+          bitmap.close();
+          this.#frameInFlight = false;
+        }
+      })
+      .catch(err => {
+        console.error('Frame decoding failed:', err);
         this.#frameInFlight = false;
-        this.send({ type: 'frame_ack' });
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        this.#frameInFlight = false;
-        this.send({ type: 'frame_ack', decode_error: true });
-      };
-      img.src = url;
+        //this.send({ type: 'frame_ack', decode_error: true });
+      });
+
     };
 
     clearInterval(this.#watchdog);
@@ -200,35 +229,110 @@ export class SimStream {
 
   #setupPointer() {
     const canvas = this.#canvas;
+    canvas.style.touchAction = 'none';
+
+    let activePointer = null;
     let origin = null;
+    let live = false;
+    let dragging = false;
+    let pending = null;
+    let raf = 0;
+    let lastSentAt = 0;
+    let lastSent = null;
 
     const norm = e => {
       const r = canvas.getBoundingClientRect();
       return {
         x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
-        y: Math.max(0, Math.min(1, (e.clientY - r.top)  / r.height)),
+        y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
       };
     };
 
+    const sendMove = p => {
+      this.send({ type: 'touch_move', x: p.x, y: p.y });
+      lastSent = p;
+      lastSentAt = performance.now();
+    };
+
+    // At most ~60 pointer-move messages per second. Only the latest point
+    // matters between animation frames; the backend preserves down/up order.
+    const flushOnFrame = () => {
+      raf = 0;
+      if (activePointer === null || !live || !pending) return;
+      if (performance.now() - lastSentAt >= 15) {
+        sendMove(pending);
+        pending = null;
+      } else {
+        raf = requestAnimationFrame(flushOnFrame);
+      }
+    };
+
+    const finish = (e, cancelled = false) => {
+      if (activePointer !== e.pointerId) return;
+      e.preventDefault();
+      const end = norm(e);
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      pending = null;
+
+      if (live) {
+        // Preserve the final position before mouse-up.
+        if (dragging && (!lastSent ||
+            Math.hypot(end.x - lastSent.x, end.y - lastSent.y) > 0.001)) {
+          sendMove(end);
+        }
+        this.send({ type: 'touch_up', x: end.x, y: end.y });
+      } else if (!cancelled && origin) {
+        // Existing tap/drag protocol for non-Quartz backends.
+        const dx = end.x - origin.x, dy = end.y - origin.y;
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) {
+          this.send({ type: 'tap', x: end.x, y: end.y });
+        } else {
+          this.send({ type: 'drag', x1: origin.x, y1: origin.y, x2: end.x, y2: end.y });
+        }
+      }
+
+      // Clear before releasePointerCapture, which may fire lostpointercapture.
+      activePointer = null;
+      origin = null;
+      live = false;
+      dragging = false;
+      lastSent = null;
+      if (canvas.hasPointerCapture(e.pointerId)) {
+        canvas.releasePointerCapture(e.pointerId);
+      }
+    };
+
     canvas.addEventListener('pointerdown', e => {
+      if (activePointer !== null || e.isPrimary === false) return;
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
+      activePointer = e.pointerId;
       origin = norm(e);
+      live = this.#liveTouch && this.#ws?.readyState === WebSocket.OPEN;
+      dragging = false;
+      pending = null;
+      lastSentAt = 0;
+      lastSent = origin;
+      if (live) this.send({ type: 'touch_down', x: origin.x, y: origin.y });
     }, { passive: false });
 
-    canvas.addEventListener('pointerup', e => {
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerId !== activePointer || !live || !origin) return;
       e.preventDefault();
-      if (!origin) return;
-      const end = norm(e);
-      const dx = end.x - origin.x, dy = end.y - origin.y;
-      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) {
-        this.send({ type: 'tap', x: end.x, y: end.y });
-      } else {
-        this.send({ type: 'drag', x1: origin.x, y1: origin.y, x2: end.x, y2: end.y });
+      const p = norm(e);
+      if (!dragging && Math.hypot(p.x - origin.x, p.y - origin.y) >= DRAG_THRESHOLD) {
+        dragging = true;
       }
-      origin = null;
+      if (!dragging) return;
+      pending = p;
+      if (!raf) raf = requestAnimationFrame(flushOnFrame);
     }, { passive: false });
 
-    canvas.addEventListener('pointercancel', () => { origin = null; });
+    canvas.addEventListener('pointerup', e => finish(e), { passive: false });
+    canvas.addEventListener('pointercancel', e => finish(e, true), { passive: false });
+    canvas.addEventListener('lostpointercapture', e => {
+      if (activePointer === e.pointerId) finish(e, true);
+    });
   }
 }

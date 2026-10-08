@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -22,18 +23,33 @@ name = "fast (Quartz)"
 # ── Sim discovery ──────────────────────────────────────────────────────────────
 
 
+_BOOTED_CACHE: dict[str, str] = {}
+_BOOTED_CACHE_TIME = 0.0
+_BOOTED_CACHE_TTL = 20.0  # seconds
+
+
 def _booted_udids() -> dict[str, str]:
-    """Returns {device_name: udid} for all booted simulators."""
+    global _BOOTED_CACHE, _BOOTED_CACHE_TIME
+
+    now = time.monotonic()
+    if now - _BOOTED_CACHE_TIME < _BOOTED_CACHE_TTL:
+        return _BOOTED_CACHE
+
     result = subprocess.run(
         ["xcrun", "simctl", "list", "devices", "--json"],
         capture_output=True,
         text=True,
+        check=True,
     )
+
     out: dict[str, str] = {}
     for devices in json.loads(result.stdout).get("devices", {}).values():
         for dev in devices:
             if dev.get("state") == "Booted":
                 out[dev["name"]] = dev["udid"]
+
+    _BOOTED_CACHE = out
+    _BOOTED_CACHE_TIME = now
     return out
 
 
@@ -123,17 +139,108 @@ def _mouse(event_type: int, x: float, y: float) -> None:
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
 
 
+
+# Single-pointer Quartz gesture state (per simulator).
+# CGEvent uses global macOS mouse coordinates, as in the existing tap()/drag().
+
+_LIVE_TOUCH_LOCK = threading.RLock()
+_LIVE_TOUCHES: dict[str, dict] = {}
+
+
+def _live_point(win: dict, nx: float, ny: float) -> tuple[float, float]:
+    nx = max(0.0, min(1.0, float(nx)))
+    ny = max(0.0, min(1.0, float(ny)))
+    return win["x"] + nx * win["width"], win["y"] + ny * win["height"]
+
+
+def touch_down(udid: str, nx: float, ny: float) -> None:
+    with _LIVE_TOUCH_LOCK:
+        # Recover if the previous WebSocket disappeared mid-gesture.
+        previous = _LIVE_TOUCHES.pop(udid, None)
+        if previous:
+            _mouse(Quartz.kCGEventLeftMouseUp, previous["x"], previous["y"])
+        win = _find_window(udid)
+        if win is None:
+            return
+        x, y = _live_point(win, nx, ny)
+        _mouse(Quartz.kCGEventLeftMouseDown, x, y)
+        _LIVE_TOUCHES[udid] = {
+            "win": win, "x": x, "y": y, "started": time.monotonic(),
+        }
+
+
+def touch_move(udid: str, nx: float, ny: float) -> None:
+    with _LIVE_TOUCH_LOCK:
+        state = _LIVE_TOUCHES.get(udid)
+        if state is None:
+            return
+        x, y = _live_point(state["win"], nx, ny)
+        if (x, y) != (state["x"], state["y"]):
+            _mouse(Quartz.kCGEventLeftMouseDragged, x, y)
+            state["x"], state["y"] = x, y
+
+
+def touch_up(udid: str, nx: float, ny: float) -> None:
+    with _LIVE_TOUCH_LOCK:
+        state = _LIVE_TOUCHES.pop(udid, None)
+        if state is None:
+            return
+        x, y = _live_point(state["win"], nx, ny)
+        # Very quick taps still need a small physical press duration.
+        remaining = 0.02 - (time.monotonic() - state["started"])
+        if remaining > 0:
+            time.sleep(remaining)
+        _mouse(Quartz.kCGEventLeftMouseUp, x, y)
+
+
+def touch_cancel(udid: str) -> None:
+    with _LIVE_TOUCH_LOCK:
+        state = _LIVE_TOUCHES.pop(udid, None)
+        if state is not None:
+            _mouse(Quartz.kCGEventLeftMouseUp, state["x"], state["y"])
+
+
+
 def tap(udid: str, nx: float, ny: float, dev_w: int, dev_h: int) -> None:
+    t0 = time.perf_counter()
+
     win = _find_window(udid)
+    t1 = time.perf_counter()
     if not win:
+        print("[tap-profile] Window not found", flush=True)
         return
+
     x = win["x"] + nx * win["width"]
     y = win["y"] + ny * win["height"]
-    _activate()
-    time.sleep(0.05)
+
+    #_activate()
+    t2 = time.perf_counter()
+
+    #time.sleep(0.05)
+    t3 = time.perf_counter()
+
     _mouse(Quartz.kCGEventLeftMouseDown, x, y)
-    time.sleep(0.05)
+    t4 = time.perf_counter()
+
+    time.sleep(0.02)
+    t5 = time.perf_counter()
+
     _mouse(Quartz.kCGEventLeftMouseUp, x, y)
+    t6 = time.perf_counter()
+
+    ms = lambda a, b: (b - a) * 1000
+    print(
+        f"[tap-profile] "
+        f"lookup={ms(t0,t1):.1f}ms "
+        f"activate={ms(t1,t2):.1f}ms "
+        f"wait1={ms(t2,t3):.1f}ms "
+        f"down={ms(t3,t4):.1f}ms "
+        f"wait2={ms(t4,t5):.1f}ms "
+        f"up={ms(t5,t6):.1f}ms "
+        f"TOTAL={ms(t0,t6):.1f}ms",
+        flush=True,
+    )
+
 
 
 def drag(
