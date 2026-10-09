@@ -224,45 +224,14 @@ def touch_cancel(udid: str) -> None:
 
 
 def tap(udid: str, nx: float, ny: float, dev_w: int, dev_h: int) -> None:
-    t0 = time.perf_counter()
-
     win = _find_window(udid)
-    t1 = time.perf_counter()
     if not win:
-        print("[tap-profile] Window not found", flush=True)
         return
-
     x = win["x"] + nx * win["width"]
     y = win["y"] + ny * win["height"]
-
-    #_activate()
-    t2 = time.perf_counter()
-
-    #time.sleep(0.05)
-    t3 = time.perf_counter()
-
     _mouse(Quartz.kCGEventLeftMouseDown, x, y)
-    t4 = time.perf_counter()
-
     time.sleep(0.02)
-    t5 = time.perf_counter()
-
     _mouse(Quartz.kCGEventLeftMouseUp, x, y)
-    t6 = time.perf_counter()
-
-    ms = lambda a, b: (b - a) * 1000
-    print(
-        f"[tap-profile] "
-        f"lookup={ms(t0,t1):.1f}ms "
-        f"activate={ms(t1,t2):.1f}ms "
-        f"wait1={ms(t2,t3):.1f}ms "
-        f"down={ms(t3,t4):.1f}ms "
-        f"wait2={ms(t4,t5):.1f}ms "
-        f"up={ms(t5,t6):.1f}ms "
-        f"TOTAL={ms(t0,t6):.1f}ms",
-        flush=True,
-    )
-
 
 
 def drag(

@@ -497,14 +497,6 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                     frame_id += 1
                     await ws.send_bytes(frame)
 
-                    now = asyncio.get_running_loop().time()
-                    prev = state.get("_debug_last_send")
-                    state["_debug_last_send"] = now
-
-                    if prev is not None:
-                        gap_ms = (now - prev) * 1000
-                        if gap_ms > 60:
-                            print(f"[debug] Frame interval: {gap_ms:.1f} ms", flush=True)
 
                     now = asyncio.get_running_loop().time()
                     if now - last_stats_at >= 1.0:
@@ -561,8 +553,6 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                     "touch_down", "touch_move", "touch_up",
                     "accessibility_swipe",
                 ):
-                    # Record queue wait for existing tap diagnostics.
-                    data["_received_at"] = asyncio.get_running_loop().time()
                     if (data.get("type") == "touch_move"
                             and input_events
                             and input_events[-1].get("type") == "touch_move"):
@@ -634,9 +624,6 @@ async def _handle_input(
         if sent_at is not None:
             ack_ms = (asyncio.get_running_loop().time() - sent_at) * 1000
 
-            if ack_ms > 40:
-                print(f"[debug] ACK latency: {ack_ms:.1f} ms", flush=True)
-
             _adapt_stream(state, ack_ms=ack_ms)
         return
 
@@ -671,22 +658,11 @@ async def _handle_input(
             if state.get("forced_landscape"):
                 x, y = _map_for_forced_landscape(x, y)
                 dev_w, dev_h = state["dev_h"], state["dev_w"]
-            loop = asyncio.get_running_loop()
-            started = loop.time()
 
-            queue_ms = (
-                started - data.get("_received_at", started)
-            ) * 1000
 
             await _run(backend.tap, udid, x, y, dev_w, dev_h)
 
-            backend_ms = (loop.time() - started) * 1000
 
-            print(
-                f"[tap] queue={queue_ms:.1f}ms "
-                f"backend={backend_ms:.1f}ms",
-                flush=True,
-)
         elif t == "drag":
             x1, y1, x2, y2 = data["x1"], data["y1"], data["x2"], data["y2"]
             dev_w, dev_h = state["dev_w"], state["dev_h"]
