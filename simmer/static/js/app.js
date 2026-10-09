@@ -484,7 +484,7 @@ function addSimPanel(udid, name, w, h) {
   const statsEl = pillEl.querySelector('.stream-stats');
   const panel = {
     stream: null, panelEl, frameEl, canvasEl, overlayEl, pillEl, dotEl, statsEl,
-    ro: null, appearMode: 'dark',
+    ro: null, appearMode: 'dark', twoFingerMode: false,
   };
   simPanels.set(udid, panel);
 
@@ -710,6 +710,9 @@ function createPill(udid) {
       </svg>
     </button>
     <div class="pill-sep"></div>
+    ${udid.startsWith('emulator-')
+      ? '<button class="pill-btn" data-action="two-finger" title="TalkBack scroll (ADB swipe)" aria-pressed="false">2F</button>'
+      : ''}
     <button class="pill-btn" data-action="kbd" title="Keyboard">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <rect x="1" y="5" width="18" height="11" rx="2"/>
@@ -742,6 +745,17 @@ function createPill(udid) {
           : `<svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.5a6.5 6.5 0 0 0 0 13A7.5 7.5 0 0 1 10 3.5z"/></svg>`;
         btn.title = light ? 'Switch to dark' : 'Switch to light';
         panel.stream?.send({ type: 'appearance', mode: panel.appearMode });
+        break;
+      }
+      case 'two-finger': {
+        if (!panel) break;
+        panel.twoFingerMode = !panel.twoFingerMode;
+        panel.stream?.setTwoFinger(panel.twoFingerMode);
+        btn.classList.toggle('active', panel.twoFingerMode);
+        btn.setAttribute('aria-pressed', String(panel.twoFingerMode));
+        btn.title = panel.twoFingerMode
+          ? 'TalkBack scroll (ADB swipe): ON'
+          : 'TalkBack scroll (ADB swipe)';
         break;
       }
       case 'kbd': {

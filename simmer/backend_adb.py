@@ -196,6 +196,35 @@ class AdbBackend:
         except Exception:
             pass
 
+    def accessibility_swipe(
+        self, udid: str,
+        nx1: float, ny1: float, nx2: float, ny2: float,
+        dev_w: int, dev_h: int,
+    ) -> None:
+        """Completed ADB swipe for TalkBack scrolling; not a real two-touch event."""
+        if not udid.startswith("emulator-"):
+            return
+        try:
+            result = _adb(udid, "shell", "wm", "size", timeout=3)
+            if result.returncode != 0:
+                return
+            dims = _parse_size(result.stdout.decode())
+            if not dims:
+                return
+            w, h = dims
+            if dev_w > dev_h:
+                w, h = max(w, h), min(w, h)
+            else:
+                w, h = min(w, h), max(w, h)
+            clamp = lambda p: max(0.0, min(1.0, float(p)))
+            # Explicit class dispatch avoids QuartzInputMixin.drag in fast mode.
+            AdbBackend.drag(
+                self, udid, clamp(nx1), clamp(ny1),
+                clamp(nx2), clamp(ny2), w, h,
+            )
+        except Exception as exc:
+            print(f"[2F] ADB accessibility swipe failed: {exc}", flush=True)
+
     def key(self, udid: str, k: str) -> None:
         kc = _KEYMAP.get(k.lower())
         if kc:

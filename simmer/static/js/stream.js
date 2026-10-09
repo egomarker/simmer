@@ -7,6 +7,7 @@ const DRAG_THRESHOLD  = 0.015;
 
 export class SimStream {
   #liveTouch = false;
+  #twoFinger = false;
   #udid; #canvas; #ctx;
   #ws = null; #connectTimer = null; #reconnectTimer = null; #watchdog = null;
   #lastFrameAt = 0; #firstFrame = false; #frameInFlight = false;
@@ -61,6 +62,9 @@ export class SimStream {
     this.send({ type: 'settings', ...patch });
   }
 
+  setTwoFinger(enabled) {
+    this.#twoFinger = Boolean(enabled);
+  }
   destroy() {
     clearTimeout(this.#connectTimer);
     clearTimeout(this.#reconnectTimer);
@@ -237,6 +241,7 @@ export class SimStream {
     let activePointer = null;
     let origin = null;
     let live = false;
+    let twoFingerGesture = false;
     let dragging = false;
     let pending = null;
     let raf = 0;
@@ -278,7 +283,18 @@ export class SimStream {
       raf = 0;
       pending = null;
 
-      if (live) {
+      if (twoFingerGesture) {
+        // This deliberately sends no Quartz events while the finger moves.
+        // Perform one compat-style ADB swipe when the browser finger lifts.
+        if (!cancelled && origin &&
+            Math.hypot(end.x - origin.x, end.y - origin.y) >= DRAG_THRESHOLD) {
+          this.send({
+            type: 'accessibility_swipe',
+            x1: origin.x, y1: origin.y,
+            x2: end.x, y2: end.y,
+          });
+        }
+      } else if (live) {
         // Preserve the final position before mouse-up.
         if (dragging && (!lastSent ||
             Math.hypot(end.x - lastSent.x, end.y - lastSent.y) > 0.001)) {
@@ -299,6 +315,7 @@ export class SimStream {
       activePointer = null;
       origin = null;
       live = false;
+      twoFingerGesture = false;
       dragging = false;
       lastSent = null;
       if (canvas.hasPointerCapture(e.pointerId)) {
@@ -312,7 +329,10 @@ export class SimStream {
       canvas.setPointerCapture(e.pointerId);
       activePointer = e.pointerId;
       origin = norm(e);
-      live = this.#liveTouch && this.#ws?.readyState === WebSocket.OPEN;
+      // Freeze mode for this drag; do not send Quartz down/move/up in 2F.
+      twoFingerGesture = this.#twoFinger;
+      live = !twoFingerGesture && this.#liveTouch &&
+             this.#ws?.readyState === WebSocket.OPEN;
       dragging = false;
       pending = null;
       lastSentAt = 0;

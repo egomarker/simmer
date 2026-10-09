@@ -559,6 +559,7 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
                     "tap", "drag", "key", "text",
                     "home", "rotate", "appearance",
                     "touch_down", "touch_move", "touch_up",
+                    "accessibility_swipe",
                 ):
                     # Record queue wait for existing tap diagnostics.
                     data["_received_at"] = asyncio.get_running_loop().time()
@@ -640,6 +641,18 @@ async def _handle_input(
         return
 
     try:
+        if t == "accessibility_swipe":
+            # Do not permit this Android-only message to operate on iOS.
+            if not udid.startswith("emulator-"):
+                return
+            concrete = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
+            action = getattr(concrete, "accessibility_swipe", None)
+            if not callable(action):
+                return
+            coords = [max(0.0, min(1.0, float(data[k])))
+                      for k in ("x1", "y1", "x2", "y2")]
+            await _run(action, udid, *coords, state["dev_w"], state["dev_h"])
+            return
         if t in ("touch_down", "touch_move", "touch_up"):
             # Use the concrete backend: MultiBackend may not expose touch methods.
             concrete = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
