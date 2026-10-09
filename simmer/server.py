@@ -611,7 +611,7 @@ async def _handle_input(
             state["target_fps"] = max(1, min(60, int(data["fps"])))
             state["fps"] = state["target_fps"]
         if "quality" in data:
-            state["target_quality"] = max(10, min(95, int(data["quality"])))
+            state["target_quality"] = max(1, min(95, int(data["quality"])))
             state["quality"] = state["target_quality"]
         if "data_saver" in data:
             state["data_saver"] = bool(data["data_saver"])
