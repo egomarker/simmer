@@ -22,6 +22,21 @@ class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
         # but we avoid scanning windows for every frame.
         self._window_ids: dict[str, tuple[int, float]] = {}
 
+    def list_sims(self):
+        sims = super().list_sims()
+
+        for sim in sims:
+            try:
+                rect = self._input_rect(sim.udid)
+            except Exception:
+                rect = None
+
+            if rect is not None:
+                sim.width = int(round(rect["width"]))
+                sim.height = int(round(rect["height"]))
+
+        return sims
+
     def _window_id(self, udid: str) -> Optional[int]:
         match = re.fullmatch(r"emulator-(\d+)", udid)
         if not match:
