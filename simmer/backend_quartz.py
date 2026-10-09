@@ -13,10 +13,10 @@ from typing import Optional
 
 import AppKit
 import Quartz
-import CoreFoundation
 
 from .backend_base import SimDevice
 from .backend_ios import press_home
+from .quartz_jpeg import encode_jpeg
 
 name = "fast (Quartz)"
 
@@ -125,22 +125,7 @@ def capture(udid: str, quality: int = 70) -> Optional[bytes]:
         if image is None:
             return None
 
-        bitmap = AppKit.NSBitmapImageRep.alloc().initWithCGImage_(image)
-        jpeg_data = bitmap.representationUsingType_properties_(
-            AppKit.NSBitmapImageFileTypeJPEG,
-            {AppKit.NSImageCompressionFactor: quality / 100.0},
-        )
-
-        if jpeg_data is None:
-            return None
-
-        length = CoreFoundation.CFDataGetLength(jpeg_data)
-        ptr = CoreFoundation.CFDataGetBytePtr(jpeg_data)
-        view = ptr.as_buffer(length)
-        try:
-            return view.tobytes()
-        finally:
-            del view
+        return encode_jpeg(image, quality)
 
     finally:
         del pool

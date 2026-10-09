@@ -13,6 +13,7 @@ from .backend_adb import AdbBackend
 
 
 from .backend_android_input_quartz import QuartzInputMixin
+from .quartz_jpeg import encode_jpeg
 
 class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
     name = "android (Quartz capture + Quartz touch + adb controls)"
@@ -77,9 +78,7 @@ class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
 
     def capture(self, udid: str, quality: int) -> Optional[bytes]:
         try:
-            import AppKit
             import Quartz
-            import CoreFoundation
 
             wid = self._window_id(udid)
             if wid is not None:
@@ -94,19 +93,9 @@ class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
                     # Window ID may have changed; rediscover next time.
                     self._window_ids.pop(udid, None)
                 else:
-                    bitmap = AppKit.NSBitmapImageRep.alloc().initWithCGImage_(image)
-                    jpeg = bitmap.representationUsingType_properties_(
-                        AppKit.NSBitmapImageFileTypeJPEG,
-                        {AppKit.NSImageCompressionFactor: max(0, min(100, quality)) / 100.0},
-                    )
-                    if jpeg:
-                        length = CoreFoundation.CFDataGetLength(jpeg)
-                        ptr = CoreFoundation.CFDataGetBytePtr(jpeg)
-                        view = ptr.as_buffer(length)
-                        try:
-                            return view.tobytes()
-                        finally:
-                            del view
+                    frame = encode_jpeg(image, quality)
+                    if frame:
+                        return frame
         except Exception as exc:
             # A missing/disappearing window should never make streaming fail.
             print(f"[android-quartz] fallback to ADB: {exc}", flush=True)
