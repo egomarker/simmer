@@ -224,7 +224,10 @@ class WindowCapture:
         srgb = q.CGColorSpaceCreateWithName(q.kCGColorSpaceSRGB)
 
         _, target_w, target_h = self.target
-        pw, ph = q.CVPixelBufferGetWidth(image), q.CVPixelBufferGetHeight(image)
+        #pw, ph = q.CVPixelBufferGetWidth(image), q.CVPixelBufferGetHeight(image)
+        extent = ci.extent()
+        pw = int(extent.size.width)
+        ph = int(extent.size.height)
         x, y, w, h = pixel_crop(crop, target_w, target_h, pw, ph)
         roi = q.CGRectMake(x, y, w, h)
         cg = self.context.createCGImage_fromRect_format_colorSpace_deferred_(
