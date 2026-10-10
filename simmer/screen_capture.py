@@ -31,6 +31,12 @@ def pooled(fn, *args):
 
 
 def load_api():
+    import AppKit
+
+    AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+        AppKit.NSApplicationActivationPolicyAccessory
+    )
+
     if sys.platform != "darwin" or int(platform.mac_ver()[0].split(".")[0] or 0) < 14:
         raise RuntimeError("--fast2 requires macOS 14 or later; use --mode fast on older macOS")
     if threading.current_thread() is not threading.main_thread():
@@ -207,8 +213,10 @@ class WindowCapture:
             )
             self.context = q.CIContext.contextWithOptions_(options)
         ci = q.CIImage.imageWithCVPixelBuffer_(image)
+        srgb = q.CGColorSpaceCreateWithName(q.kCGColorSpaceSRGB)
+
         cg = self.context.createCGImage_fromRect_format_colorSpace_deferred_(
-            ci, ci.extent(), q.kCIFormatRGBA8, None, False,
+            ci, ci.extent(), q.kCIFormatRGBA8, srgb, False,
         )
         if cg is None:
             raise RuntimeError("Core Image failed to materialize the captured window")
