@@ -379,7 +379,7 @@ async function handleAddBoot(id, name, platform, w, h) {
       _pendingBoots.delete(id);
       allSims = sims;
       renderDeviceList();
-      addSimPanel(booted.id, booted.name, booted.width, booted.height);
+      addSimPanel(booted.id, booted.name, booted.width, booted.height, booted.platform);
     }
   }, 2000);
 
@@ -422,8 +422,9 @@ function renderDeviceList() {
   }
   deviceList.innerHTML = bootingRows + sims.map(s => `
     <div class="device-item${simPanels.has(s.id) ? ' active' : ''}"
-         data-udid="${esc(s.id)}" data-name="${esc(s.name)}"
-         data-w="${s.width}" data-h="${s.height}">
+        data-udid="${esc(s.id)}" data-name="${esc(s.name)}"
+        data-platform="${esc(s.platform)}"
+        data-w="${s.width}" data-h="${s.height}">
       <span class="device-icon">${simIcon(s.name)}</span>
       <span class="device-info">
         <span class="device-name">${esc(s.name)}</span>
@@ -434,25 +435,30 @@ function renderDeviceList() {
 
   deviceList.querySelectorAll('.device-item').forEach(el => {
     el.addEventListener('click', () =>
-      toggleDevice(el.dataset.udid, el.dataset.name,
-                   parseInt(el.dataset.w), parseInt(el.dataset.h)));
+      toggleDevice(
+        el.dataset.udid,
+        el.dataset.name,
+        parseInt(el.dataset.w),
+        parseInt(el.dataset.h),
+        el.dataset.platform
+      ));
   });
 }
 
 // ── Sim panel management ──────────────────────────────────────────────────────
-function toggleDevice(udid, name, w, h) {
+function toggleDevice(udid, name, w, h, platform) {
   if (simPanels.has(udid)) {
     removeSimPanel(udid);
   } else {
     if (isMobileViewport()) {
       for (const openUdid of [...simPanels.keys()]) removeSimPanel(openUdid, { silent: true });
     }
-    addSimPanel(udid, name, w, h);
+    addSimPanel(udid, name, w, h, platform);
   }
   closeMobileSidebar();
 }
 
-function addSimPanel(udid, name, w, h) {
+function addSimPanel(udid, name, w, h, platform) {
   if (simPanels.has(udid)) { setFocusedPanel(udid); return; }
 
   // ── Build DOM ──
@@ -483,7 +489,9 @@ function addSimPanel(udid, name, w, h) {
   const dotEl = pillEl.querySelector('.status-dot');
   const statsEl = pillEl.querySelector('.stream-stats');
   const panel = {
-    stream: null, panelEl, frameEl, canvasEl, overlayEl, pillEl, dotEl, statsEl,
+    stream: null, panelEl, frameEl, canvasEl,
+    overlayEl, pillEl, dotEl, statsEl,
+    platform,
     ro: null, appearMode: 'dark', twoFingerMode: false,
   };
   simPanels.set(udid, panel);
@@ -539,26 +547,42 @@ function removeSimPanel(udid, { silent = false } = {}) {
 
 // Corner radius in logical points for each device class.
 // Matches UIScreen.cornerRadius on the actual device at 1× logical resolution.
+// iOS device corner radius in logical points.
 function deviceCornerRadius(w, h) {
   const short = Math.min(w, h);
-  if (short >= 500) return 12;   // Android physical pixels (1080+) — moderate radius
-  if (short >= 744) return 18;   // iPad logical dp
-  if (short <= 320) return 4;    // iPhone SE 1st gen
-  if (short <= 375) return 39;   // iPhone X / SE 2nd–3rd gen era
-  return 47;                     // iPhone 12 and later (larger radius)
+
+  if (short >= 744) return 18;  // iPad
+  if (short <= 320) return 4;   // iPhone SE 1st gen
+  if (short <= 375) return 39;  // Older iPhones
+  return 47;                    // Modern iPhones
 }
 
 function sizeFrame(panel) {
-  const { panelEl, frameEl, canvasEl } = panel;
+  const { panelEl, frameEl, canvasEl, platform } = panel;
+
   const rect = panelEl.getBoundingClientRect();
-  // Account for horizontal padding (2 × sp-5 = 40px) and bottom space for pill
-  const availW = Math.max(1, rect.width  - 40);
-  const availH = Math.max(1, rect.height - 20 - (48 + 32)); // top sp-5, bottom pill+gap
-  const scale  = Math.min(availW / canvasEl.width, availH / canvasEl.height);
-  frameEl.style.width  = Math.round(canvasEl.width  * scale) + 'px';
-  frameEl.style.height = Math.round(canvasEl.height * scale) + 'px';
-  const r = Math.round(deviceCornerRadius(canvasEl.width, canvasEl.height) * scale);
-  frameEl.style.borderRadius = r + 'px';
+
+  const availW = Math.max(1, rect.width - 40);
+  const availH = Math.max(1, rect.height - 20 - (48 + 32));
+
+  const scale = Math.min(
+    availW / canvasEl.width,
+    availH / canvasEl.height
+  );
+
+  frameEl.style.width =
+    Math.round(canvasEl.width * scale) + 'px';
+
+  frameEl.style.height =
+    Math.round(canvasEl.height * scale) + 'px';
+
+  const radius = platform === 'android'
+    ? 12
+    : Math.round(
+        deviceCornerRadius(canvasEl.width, canvasEl.height) * scale
+      );
+
+  frameEl.style.borderRadius = radius + 'px';
 }
 
 // ── Dividers between panels ───────────────────────────────────────────────────
@@ -1021,7 +1045,7 @@ const urlUdid = new URLSearchParams(location.search).get('view');
 loadSims().then(() => {
   if (urlUdid) {
     const sim = allSims.find(s => s.id === urlUdid);
-    if (sim) addSimPanel(sim.id, sim.name, sim.width, sim.height);
+    if (sim) addSimPanel(sim.id, sim.name, sim.width, sim.height, sim.platform);
     return;
   }
 
@@ -1040,7 +1064,7 @@ loadSims().then(() => {
   const restoreUdids = isMobileViewport() ? (s.openUdids || []).slice(0, 1) : (s.openUdids || []);
   for (const udid of restoreUdids) {
     const sim = allSims.find(sim => sim.id === udid);
-    if (sim) addSimPanel(sim.id, sim.name, sim.width, sim.height);
+    if (sim) addSimPanel(sim.id, sim.name, sim.width, sim.height, sim.platform);
   }
 
   // Restore terminal layout first, then open it (so size is set before fit()).

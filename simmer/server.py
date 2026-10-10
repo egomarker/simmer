@@ -411,7 +411,14 @@ async def _sims(request: web.Request) -> web.Response:
     else:
         flags = [False] * len(sims)
 
-    result = [{**s.to_dict(), "project_app": flag} for s, flag in zip(sims, flags)]
+    result = [
+        {
+            **s.to_dict(),
+            "platform": "android" if s.udid.startswith("emulator-") else "ios",
+            "project_app": flag,
+        }
+        for s, flag in zip(sims, flags)
+    ]
     return web.json_response(result)
 
 
