@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import fcntl
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -15,6 +16,7 @@ import subprocess
 import sys as _sys
 import termios
 import uuid
+import weakref
 from collections import deque
 from importlib.resources import files
 from pathlib import Path
@@ -195,6 +197,25 @@ async def _cors_middleware(request: web.Request, handler) -> web.StreamResponse:
     return resp
 
 
+async def _backend_lifecycle(app: web.Application):
+    backend = app["backend"]
+    try:
+        startup = getattr(backend, "startup", None)
+        if inspect.iscoroutinefunction(startup):
+            await startup()
+        yield
+    finally:
+        shutdown = getattr(backend, "shutdown", None)
+        if inspect.iscoroutinefunction(shutdown):
+            await shutdown()
+
+
+async def _shutdown_sim_sockets(app: web.Application) -> None:
+    await asyncio.gather(*[
+        _close_ws_quietly(ws) for ws in list(app["sim_sockets"])
+    ], return_exceptions=True)
+
+
 def make_app(
     backend: Any,
     fps: int = 15,
@@ -208,6 +229,9 @@ def make_app(
     app["default_quality"] = quality
     app["project_dir"] = project_dir or os.getcwd()
     app["bundle_id"] = bundle_id
+    app["sim_sockets"] = weakref.WeakSet()
+    app.cleanup_ctx.append(_backend_lifecycle)
+    app.on_shutdown.append(_shutdown_sim_sockets)
     app.router.add_get("/", _index)
     app.router.add_get("/api/info", _info)
     app.router.add_post("/api/request-permissions", _request_permissions)
@@ -405,6 +429,7 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
     except (AssertionError, ConnectionResetError):
         return ws  # client disconnected before WS upgrade finished
 
+    request.app["sim_sockets"].add(ws)
     q = request.rel_url.query
     state = {
         "fps": int(q.get("fps", request.app["default_fps"])),
@@ -989,6 +1014,21 @@ async def run(
 
     print("\n  HTTP is fine — Tailscale encrypts the tunnel, no HTTPS needed.")
     print("─" * 40 + "\n")
+
+    if getattr(backend, "graceful_shutdown", False) is True:
+        # Keep Cocoa's pump alive through SCStream stop completions, then release
+        # native buffers. Legacy modes retain their immediate-exit behavior.
+        stopped = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, stopped.set)
+        try:
+            await stopped.wait()
+        finally:
+            await runner.cleanup()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
+        return
 
     # OS-level signal handlers — fire even when the event loop is blocked
     signal.signal(signal.SIGINT, lambda *_: os._exit(0))

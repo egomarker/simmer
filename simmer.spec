@@ -15,6 +15,8 @@ hidden_imports = (
     collect_submodules('Quartz') +
     collect_submodules('AppKit') +
     collect_submodules('Foundation') +
+    collect_submodules('CoreMedia') +
+    collect_submodules('ScreenCaptureKit') +
     ['_multiprocessing', 'multiprocessing.resource_tracker', 'multiprocessing.synchronize']
 )
 

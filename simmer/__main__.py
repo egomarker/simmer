@@ -16,7 +16,13 @@ from .server import run
 
 
 def _select_backend(mode: str):
-    if mode == "fast":
+    if mode == "fast2":
+        from .backend_sck import IOSScreenCaptureBackend
+        from .screen_capture import CaptureService
+
+        service = CaptureService()
+        ios = IOSScreenCaptureBackend(service)
+    elif mode == "fast":
         from . import backend_quartz
 
         ios = backend_quartz
@@ -47,7 +53,11 @@ def _select_backend(mode: str):
     if has_adb():
         from . import backend_adb
 
-        if mode == "fast" or (mode == "auto" and getattr(ios, "name", "") == "fast (Quartz)"):
+        if mode == "fast2":
+            from .backend_sck import AndroidScreenCaptureBackend
+
+            backends.append(AndroidScreenCaptureBackend(service))
+        elif mode == "fast" or (mode == "auto" and getattr(ios, "name", "") == "fast (Quartz)"):
             from .backend_android_quartz import AndroidQuartzBackend
             backends.append(AndroidQuartzBackend())
         else:
@@ -103,11 +113,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--fps", type=int, default=15)
     parser.add_argument("--quality", type=int, default=70)
     parser.add_argument("--kill", action="store_true", help="stop the simmer instance listening on --port")
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--mode",
-        choices=["auto", "fast", "compat"],
+        choices=["auto", "fast", "fast2", "compat"],
         default="auto",
-        help="auto | fast: Quartz | compat: simctl+idb",
+        help="auto | fast: Quartz | fast2: ScreenCaptureKit + Quartz input | compat: simctl+idb",
+    )
+    modes.add_argument("--fast", dest="mode", action="store_const", const="fast", help="alias for --mode fast")
+    modes.add_argument(
+        "--fast2", dest="mode", action="store_const", const="fast2",
+        help="experimental ScreenCaptureKit capture with fast-mode Quartz input (macOS 14+)",
     )
     parser.add_argument(
         "--project-dir",

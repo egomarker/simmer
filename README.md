@@ -46,6 +46,12 @@ Optional, for the **fast** backend (recommended):
 - Screen Recording permission granted to Terminal / your shell
 - Accessibility permission only if you want fast-mode tap/drag, keyboard shortcuts, or text paste
 
+Optional, for the experimental **fast2** backend:
+
+- macOS **14 Sonoma or later**
+- The same Screen Recording / Accessibility permissions as fast mode
+- ScreenCaptureKit and CoreMedia PyObjC wrappers (included in the updated source dependencies)
+
 Optional, for the **compat** backend:
 
 - [`idb-companion`](https://github.com/facebook/idb) — `brew tap facebook/fb && brew install idb-companion`
@@ -86,7 +92,9 @@ simmer
 simmer --port 8080     # custom port (default: 4040)
 simmer --fps 30        # capture frame rate (default: 15)
 simmer --quality 80    # JPEG quality 10–95 (default: 70)
-simmer --mode fast     # force Quartz backend (iOS)
+simmer --mode fast     # force Quartz backend (alias: --fast)
+simmer --fast2         # opt-in ScreenCaptureKit capture + the same Quartz input
+simmer --mode fast2    # equivalent to --fast2; auto never selects this mode
 simmer --mode compat   # force simctl+idb backend (iOS)
 simmer --kill          # stop a running instance
 ```
@@ -100,6 +108,7 @@ simmer picks the best backend automatically and combines them — iOS and Androi
 | Mode | Capture | Input | Requires |
 |------|---------|-------|----------|
 | **fast** | Quartz (native) | CGEvent + simulator helpers | Screen Recording; Accessibility for host mouse/key fallbacks |
+| **fast2** (opt-in) | ScreenCaptureKit `SCStream` | Same Quartz input / simulator helpers as fast | macOS 14+; same permissions as fast |
 | **compat** | `simctl screenshot` | `idb` + `simctl` | `idb-companion`; no macOS privacy permissions |
 | **Android** | `adb screencap` | `adb input` | Android Studio |
 
@@ -107,16 +116,16 @@ The startup log tells you which mode is active and what's needed to upgrade.
 
 ### Permission matrix
 
-| Feature | fast mode | compat mode | Notes |
+| Feature | fast / fast2 mode | compat mode | Notes |
 |---------|-----------|-------------|-------|
-| Stream iOS screen | **Screen Recording** | No macOS permission | Fast mode captures the Simulator window with Quartz. |
+| Stream iOS screen | **Screen Recording** | No macOS permission | Fast uses Quartz capture; opt-in fast2 uses ScreenCaptureKit. |
 | Tap / drag iOS | **Accessibility** | No macOS permission | Compat mode uses `idb ui tap/swipe`; fast mode uses CGEvent mouse injection. |
 | Keyboard buttons | **Accessibility** | No macOS permission | Compat mode uses `idb ui key`; fast mode uses CGEvent keyboard events. |
 | Send text | **Accessibility** | No macOS permission | Fast mode pastes via host keyboard shortcut; compat mode uses `idb ui text`. |
 | Home button | Usually no Accessibility | No macOS permission | Uses `idb ui button HOME`, then `simctl launch ... com.apple.springboard`; fast mode only falls back to Cmd+Shift+H if those fail. |
 | iOS rotate | No macOS permission | No macOS permission | Uses a generated XCTest orientation harness first, then falls back to `rotate_sim` only if XCTest fails. |
 | Appearance switch | No macOS permission | No macOS permission | Uses `xcrun simctl ui appearance`. |
-| Android controls | No macOS permission | No macOS permission | Android uses `adb` and is independent of iOS backend mode. |
+| Android controls | **Accessibility** for Quartz touch | No macOS permission | Fast/fast2 use Quartz touch; remaining Android controls use ADB. |
 
 ### Fast mode — grant permissions
 
@@ -125,6 +134,36 @@ In **System Settings → Privacy & Security**:
 - **Screen Recording** → add Terminal (or your Python binary)
 - **Accessibility** → add Terminal / your shell for fast-mode taps, drags, keyboard, and text paste
 - **Accessibility** → add `rotate_sim` only if the XCTest rotate fallback fails and you still want Simulator menu/keyboard rotation
+
+### Fast2 mode — experimental ScreenCaptureKit capture
+
+```bash
+# Update source dependencies using your existing Python installation; no venv is required.
+python3 -m pip install -e .
+simmer --fast2 --fps 60 --quality 20
+```
+
+`--fast2` (also `--mode fast2`) uses a desktop-independent `SCStream` per active
+simulator/emulator window. Input is delegated to the existing fast backend:
+iOS Quartz touch/keyboard and simulator helpers; Android Quartz touch and ADB
+controls. It does not change `--mode fast`, `--fast`, `--mode compat`, or auto-selection.
+
+- Keep the simulator/emulator window open. This mode does not silently fall back
+  to the old Quartz capture API or to ADB capture when a window is unavailable.
+- Native frames arrive at up to 60 FPS; the existing browser FPS, quality, ACK
+  backpressure and Data Saver controls still determine encoding/delivery.
+- Retains one latest pixel buffer and one JPEG cache entry per device, with a
+  maximum native queue depth of three. Static frames reuse the cached JPEG.
+- Window resizing/rotation or replacement rebuilds the capture stream. Streams
+  stop after about five seconds without capture requests (pause/disconnect),
+  restart on demand, and are closed during graceful server shutdown.
+- This is an experimental integration of the Mac-soaked prototype, **not a
+  claim of leak-free or indefinitely flat memory**. The integrated backend has
+  not been executed or tested as part of this change.
+
+No runtime dependency downloads are performed. The existing Python environment
+must already have the updated dependencies installed before launch. Return to
+`--mode fast` to use the previous capture implementation.
 
 ### Compat mode — install idb
 
@@ -174,6 +213,8 @@ simmer/
   __main__.py          CLI entry point + backend selection
   server.py            aiohttp HTTP + WebSocket server
   backend_quartz.py    Fast backend: Quartz window capture + CGEvent injection
+  backend_sck.py       Fast2 adapters: ScreenCaptureKit capture, existing fast input
+  screen_capture.py    Bounded SCStream/JPEG capture and native lifecycle
   backend_simctl.py    Compat backend: simctl screenshot + idb input injection
   backend_adb.py       Android backend: adb screencap + adb input
   backend_multi.py     Combines multiple backends, routes by UDID

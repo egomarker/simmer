@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import inspect
 import threading
 from typing import Optional
 
@@ -14,6 +15,29 @@ class MultiBackend:
         self._backends = backends
         self._udid_map: dict[str, object] = {}
         self._lock = threading.Lock()
+        self._started: list = []
+
+    @property
+    def graceful_shutdown(self) -> bool:
+        return any(getattr(b, "graceful_shutdown", False) is True for b in self._backends)
+
+    async def startup(self) -> None:
+        try:
+            for backend in self._backends:
+                hook = getattr(backend, "startup", None)
+                if inspect.iscoroutinefunction(hook):
+                    await hook()
+                    self._started.append(backend)
+        except BaseException:
+            await self.shutdown()
+            raise
+
+    async def shutdown(self) -> None:
+        started, self._started = self._started, []
+        for backend in reversed(started):
+            hook = getattr(backend, "shutdown", None)
+            if inspect.iscoroutinefunction(hook):
+                await hook()
 
     @property
     def name(self) -> str:
