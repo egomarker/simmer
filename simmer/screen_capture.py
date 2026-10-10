@@ -279,7 +279,7 @@ class CaptureService:
     """
 
     def __init__(self):
-        self.api = self.loop = self.pump = None
+        self.api = self.loop = None
         self.lock = threading.Lock()
         self.devices: dict[str, _DeviceState] = {}
         self.stopping = False
@@ -292,22 +292,6 @@ class CaptureService:
         self.loop = asyncio.get_running_loop()
         self.stopping = False
         self.fatal_error = None
-        self.pump = asyncio.create_task(self._pump())
-
-    def _pump_once(self):
-        f = self.api.F
-        f.NSRunLoop.currentRunLoop().runMode_beforeDate_(
-            f.NSDefaultRunLoopMode, f.NSDate.dateWithTimeIntervalSinceNow_(0),
-        )
-
-    async def _pump(self):
-        try:
-            while True:
-                pooled(self._pump_once)
-                await asyncio.sleep(0.01)
-        except Exception as exc:
-            self.fatal_error = str(exc)
-            log.error("[fast2] Cocoa run loop failed: %s", exc)
 
     def capture(self, udid, quality, find_window):
         with self.lock:
@@ -394,9 +378,6 @@ class CaptureService:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        if self.pump is not None:
-            self.pump.cancel()
-            await asyncio.gather(self.pump, return_exceptions=True)
         with self.lock:
             self.devices.clear()
-            self.loop = self.pump = None
+            self.loop = None
