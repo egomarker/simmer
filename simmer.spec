@@ -17,6 +17,7 @@ hidden_imports = (
     collect_submodules('Foundation') +
     collect_submodules('CoreMedia') +
     collect_submodules('ScreenCaptureKit') +
+    collect_submodules('ApplicationServices') +
     ['_multiprocessing', 'multiprocessing.resource_tracker', 'multiprocessing.synchronize']
 )
 

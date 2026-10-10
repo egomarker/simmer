@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "aiohttp>=3.9",
     "pyobjc-framework-Quartz",
+    "pyobjc-framework-ApplicationServices; sys_platform == 'darwin'",
     "pyobjc-framework-CoreMedia>=12.2.2; sys_platform == 'darwin'",
     "pyobjc-framework-ScreenCaptureKit>=12.2.2; sys_platform == 'darwin'",
 ]

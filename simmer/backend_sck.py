@@ -1,7 +1,11 @@
 """Opt-in --fast2: ScreenCaptureKit capture with the existing fast-mode inputs."""
 from __future__ import annotations
 
+import threading
+import time
+
 from .screen_capture import CaptureService
+from .ios_viewport import REFRESH_SECONDS, ViewportCache
 
 
 class IOSScreenCaptureBackend:
@@ -13,14 +17,61 @@ class IOSScreenCaptureBackend:
 
         self._input = backend_quartz
         self._service = service
+        self._viewport = ViewportCache()
+        self._list_lock = threading.RLock()
+        self._sims_cache = []
+        self._sims_checked = 0.0
 
     def __getattr__(self, name):
         # Discovery, live touch, taps, keys, text, home, rotation and appearance
         # remain exactly the Quartz backend's implementations.
         return getattr(self._input, name)
 
-    def _find_window(self, udid):
-        return self._input._find_window(udid)
+    def list_sims(self):
+        # /api/sims can be polled frequently; do not scan Quartz/AX more than
+        # once per 5 seconds even during multiple simultaneous client requests.
+        with self._list_lock:
+            now = time.monotonic()
+            if now - self._sims_checked < REFRESH_SECONDS:
+                return list(self._sims_cache)
+            sims = self._input.list_sims()
+            for sim in sims:
+                window = self._viewport.get(sim.udid, self._input._find_window)
+                if window is not None and window.get("crop"):
+                    sim.width, sim.height = window["crop"][2:]
+            self._sims_cache = sims
+            self._sims_checked = now
+            return list(sims)
+
+    def _find_window(self, udid, refresh=False):
+        return self._viewport.get(udid, self._input._find_window, refresh=refresh)
+
+    def invalidate_viewport(self, udid):
+        self._viewport.invalidate(udid)
+        with self._list_lock:
+            self._sims_checked = 0.0
+        self._service.invalidate(udid)
+
+    def _point(self, udid, x, y):
+        viewport = getattr(self, "_viewport", None)
+        return viewport.point(udid, x, y) if viewport else (x, y)
+
+    def touch_down(self, udid, x, y):
+        self._input.touch_down(udid, *self._point(udid, x, y))
+
+    def touch_move(self, udid, x, y):
+        self._input.touch_move(udid, *self._point(udid, x, y))
+
+    def touch_up(self, udid, x, y):
+        self._input.touch_up(udid, *self._point(udid, x, y))
+
+    def tap(self, udid, x, y, dev_w, dev_h):
+        self._input.tap(udid, *self._point(udid, x, y), dev_w, dev_h)
+
+    def drag(self, udid, x1, y1, x2, y2, dev_w, dev_h):
+        x1, y1 = self._point(udid, x1, y1)
+        x2, y2 = self._point(udid, x2, y2)
+        self._input.drag(udid, x1, y1, x2, y2, dev_w, dev_h)
 
     def capture(self, udid, quality=70):
         return self._service.capture(udid, quality, self._find_window)
@@ -41,7 +92,13 @@ class AndroidScreenCaptureBackend(IOSScreenCaptureBackend):
         self._input = AndroidQuartzBackend()
         self._service = service
 
-    def _find_window(self, udid):
+    def list_sims(self):
+        return self._input.list_sims()
+
+    def invalidate_viewport(self, udid):
+        self._service.invalidate(udid)
+
+    def _find_window(self, udid, refresh=False):
         rect = self._input._input_rect(udid)
         if rect is None:
             return None

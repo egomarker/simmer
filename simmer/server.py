@@ -723,6 +723,11 @@ async def _handle_input(
                     _forced_landscape[udid] = target_landscape
             if rotated is False:
                 rotated = await _run(backend.rotate, udid)
+            if rotated is not False:
+                concrete = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
+                invalidate = getattr(concrete, "invalidate_viewport", None)
+                if callable(invalidate):
+                    invalidate(udid)
             if rotated is not False and ws and not ws.closed:
                 await ws.send_str(json.dumps({"type": "rotated"}))
             elif ws and not ws.closed:

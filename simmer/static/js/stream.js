@@ -173,7 +173,20 @@ export class SimStream {
         const drawStart = performance.now();
 
         try {
-          this.#setOrientation(bitmap.width > bitmap.height);
+          const landscape = bitmap.width > bitmap.height;
+          const pw = Math.min(bitmap.width, bitmap.height);
+          const ph = Math.max(bitmap.width, bitmap.height);
+          if (pw !== this.#portraitW || ph !== this.#portraitH) {
+            this.#portraitW = pw;
+            this.#portraitH = ph;
+            this.#isLandscape = landscape;
+            this.#canvas.width = bitmap.width;
+            this.#canvas.height = bitmap.height;
+            this.send({ type: 'settings', dev_w: bitmap.width, dev_h: bitmap.height });
+            this.#onOrientationChange(bitmap.width, bitmap.height);
+          } else {
+            this.#setOrientation(landscape);
+          }
           this.#ctx.drawImage(
             bitmap, 0, 0,
             this.#canvas.width,

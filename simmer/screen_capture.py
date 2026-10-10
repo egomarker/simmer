@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from .quartz_jpeg import encode_jpeg
+from .ios_viewport import pixel_crop
 
 log = logging.getLogger(__name__)
 _OUTPUT_CLASS = None
@@ -109,6 +110,7 @@ class WindowCapture:
     def __init__(self, api, window):
         self.api = api
         self.target = (int(window["wid"]), int(window["width"]), int(window["height"]))
+        self.crop = window.get("crop")
         self.lock = threading.Lock()
         self.encode_lock = threading.Lock()
         self.latest = self.cache = self.cache_key = self.context = None
@@ -117,6 +119,12 @@ class WindowCapture:
         self.version = 0
         self.started_at = None
         self.error = None
+
+    def set_crop(self, crop):
+        with self.lock:
+            if self.crop != crop:
+                self.crop = crop
+                self.cache = self.cache_key = None
 
     def fail(self, error):
         with self.lock:
@@ -202,8 +210,8 @@ class WindowCapture:
         with self.lock:
             if self.stopping or self.error or self.latest is None:
                 return None
-            image, version = self.latest, self.version
-            key = (version, quality)
+            image, version, crop = self.latest, self.version, self.crop
+            key = (version, quality, crop)
             if self.cache_key == key:
                 return self.cache
         q, f = self.api.Q, self.api.F
@@ -215,8 +223,12 @@ class WindowCapture:
         ci = q.CIImage.imageWithCVPixelBuffer_(image)
         srgb = q.CGColorSpaceCreateWithName(q.kCGColorSpaceSRGB)
 
+        _, target_w, target_h = self.target
+        pw, ph = q.CVPixelBufferGetWidth(image), q.CVPixelBufferGetHeight(image)
+        x, y, w, h = pixel_crop(crop, target_w, target_h, pw, ph)
+        roi = q.CGRectMake(x, y, w, h)
         cg = self.context.createCGImage_fromRect_format_colorSpace_deferred_(
-            ci, ci.extent(), q.kCIFormatRGBA8, srgb, False,
+            ci, roi, q.kCIFormatRGBA8, srgb, False,
         )
         if cg is None:
             raise RuntimeError("Core Image failed to materialize the captured window")
@@ -268,6 +280,7 @@ class _DeviceState:
     stream: WindowCapture | None = None
     task: asyncio.Task | None = None
     message: str | None = None
+    refresh: asyncio.Event | None = None
 
 
 class CaptureService:
@@ -307,8 +320,18 @@ class CaptureService:
             stream = state.stream
         return stream.capture(quality) if stream is not None else None
 
+    def invalidate(self, udid):
+        # Called by the server after rotation. Thread-safe even when a worker
+        # thread is executing the input action.
+        with self.lock:
+            state = self.devices.get(udid)
+            loop = self.loop
+        if state is not None and state.refresh is not None and loop is not None:
+            loop.call_soon_threadsafe(state.refresh.set)
+
     def _launch(self, udid, state, find_window):
         if not self.stopping:
+            state.refresh = asyncio.Event()
             state.task = asyncio.create_task(self._watch(udid, state, find_window))
 
     def _message(self, udid, state, message):
@@ -336,7 +359,7 @@ class CaptureService:
                 if idle:
                     break
                 try:
-                    window = await asyncio.to_thread(pooled, find_window, udid)
+                    window = await asyncio.to_thread(pooled, find_window, udid, stream is None)
                     target = None if window is None else (
                         int(window["wid"]), int(window["width"]), int(window["height"]),
                     )
@@ -348,6 +371,13 @@ class CaptureService:
                             self._message(udid, state, stream.error)
                         await self._close_stream(state)
                         stream = None
+                        # A restarted stream must re-read both Quartz and AX.
+                        window = await asyncio.to_thread(pooled, find_window, udid, True)
+                        target = None if window is None else (
+                            int(window["wid"]), int(window["width"]), int(window["height"]),
+                        )
+                    if stream is not None and window is not None:
+                        stream.set_crop(window.get("crop"))
                     if target is None:
                         self._message(udid, state, "Waiting for a visible simulator/emulator window")
                     elif stream is None and not self.fatal_error:
@@ -364,7 +394,14 @@ class CaptureService:
                 except Exception as exc:
                     self._message(udid, state, str(exc))
                     await asyncio.sleep(2)
-                await asyncio.sleep(0.5)
+                # No geometry polling on frame callbacks; both Quartz and AX
+                # are checked at most every 5s except explicit invalidation.
+                try:
+                    await asyncio.wait_for(state.refresh.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    state.refresh.clear()
         finally:
             await self._close_stream(state)
             with self.lock:
