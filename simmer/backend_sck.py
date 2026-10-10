@@ -143,8 +143,22 @@ class AndroidScreenCaptureBackend(IOSScreenCaptureBackend):
         if rect is None:
             return None
 
+        width = int(round(rect["width"]))
+        height = int(round(rect["height"]))
+
+        titlebar = 28
+
         return {
             "wid": self._input._window_id(udid),
             **rect,
             "include_child_windows": False,
+
+            # Existing iOS/Core Image crop path:
+            # x, y, width, height — y is measured from the TOP.
+            "crop": (
+                0,
+                titlebar,
+                width,
+                height - titlebar,
+            ),
         }
