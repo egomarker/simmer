@@ -111,6 +111,7 @@ class WindowCapture:
         self.api = api
         self.target = (int(window["wid"]), int(window["width"]), int(window["height"]))
         self.crop = window.get("crop")
+        self.include_child_windows = window.get("include_child_windows")
         self.lock = threading.Lock()
         self.encode_lock = threading.Lock()
         self.latest = self.cache = self.cache_key = self.context = None
@@ -165,6 +166,10 @@ class WindowCapture:
             raise RuntimeError("Window is not shareable; check Screen Recording permission and window visibility")
         self.filter = sck.SCContentFilter.alloc().initWithDesktopIndependentWindow_(window)
         self.config = sck.SCStreamConfiguration.alloc().init()
+
+        if self.include_child_windows is not None:
+            self.config.setIncludeChildWindows_(self.include_child_windows)
+
         self.config.setWidth_(width)
         self.config.setHeight_(height)
         self.config.setMinimumFrameInterval_(cm.CMTimeMake(1, 60))
@@ -267,9 +272,18 @@ class WindowCapture:
         with self.lock:
             self.stopping = True
             self.accepting = False
+
         try:
             if self.start_attempted and self.stream is not None:
-                await completed_call(self.stream.stopCaptureWithCompletionHandler_)
+                try:
+                    await completed_call(
+                        self.stream.stopCaptureWithCompletionHandler_
+                    )
+                except RuntimeError as exc:
+                    message = str(exc)
+
+                    if "SCStreamErrorDomain" not in message or "Code=-3808" not in message:
+                        raise
         finally:
             try:
                 pooled(self._detach)

@@ -142,4 +142,9 @@ class AndroidScreenCaptureBackend(IOSScreenCaptureBackend):
         rect = self._input._input_rect(udid)
         if rect is None:
             return None
-        return {"wid": self._input._window_id(udid), **rect}
+
+        return {
+            "wid": self._input._window_id(udid),
+            **rect,
+            "include_child_windows": False,
+        }
