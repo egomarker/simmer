@@ -712,24 +712,47 @@ async def _handle_input(
         elif t == "home":
             await _run(backend.home, udid)
         elif t == "rotate":
-            target_landscape = not state.get("forced_landscape", False)
-            rotated = False
-            if not udid.startswith("emulator-"):
-                from .backend_ios import rotate_with_xctest
-
-                rotated = await _run(rotate_with_xctest, udid, target_landscape)
-                if rotated:
-                    state["forced_landscape"] = target_landscape
-                    _forced_landscape[udid] = target_landscape
-            if rotated is False:
-                rotated = await _run(backend.rotate, udid)
+            concrete = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
+            # Only iOS fast2 opts in. The Android fast2 subclass explicitly
+            # opts out, even for non-emulator ADB serials.
+            native = (getattr(concrete, "rotate_native", None)
+                      if getattr(concrete, "native_ios_rotation", False)
+                      and not udid.startswith("emulator-") else None)
+            native_landscape = await _run(native, udid) if callable(native) else None
+            if native_landscape is not None:
+                rotated = True
+                # Native rotation resizes the real Simulator window: never
+                # rotate its JPEGs a second time or transform touch input.
+                state["forced_landscape"] = False
+                _forced_landscape.pop(udid, None)
+            else:
+                # Preserve the old behavior for fast/compat/Android. If
+                # fast2's native attempt failed, account for the *visible*
+                # window orientation as well as any old forced state.
+                target_landscape = not state.get("forced_landscape", False)
+                if getattr(concrete, "native_ios_rotation", False) and not udid.startswith("emulator-"):
+                    current_landscape = await _run(_is_landscape, udid)
+                    target_landscape = not (state.get("forced_landscape", False) or current_landscape)
+                rotated = False
+                if not udid.startswith("emulator-"):
+                    from .backend_ios import rotate_with_xctest
+                    rotated = await _run(rotate_with_xctest, udid, target_landscape)
+                    if rotated:
+                        state["forced_landscape"] = target_landscape
+                        _forced_landscape[udid] = target_landscape
+                if rotated is False:
+                    rotated = await _run(backend.rotate, udid)
             if rotated is not False:
-                concrete = backend._backend_for(udid) if hasattr(backend, "_backend_for") else backend
                 invalidate = getattr(concrete, "invalidate_viewport", None)
                 if callable(invalidate):
                     invalidate(udid)
             if rotated is not False and ws and not ws.closed:
-                await ws.send_str(json.dumps({"type": "rotated"}))
+                message = {"type": "rotated"}
+                if native_landscape is not None:
+                    # The image may reach the browser before this response;
+                    # an explicit orientation avoids accidentally toggling it back.
+                    message["landscape"] = native_landscape
+                await ws.send_str(json.dumps(message))
             elif ws and not ws.closed:
                 await ws.send_str(json.dumps({"type": "rotate_failed"}))
         elif t == "appearance":

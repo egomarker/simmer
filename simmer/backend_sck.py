@@ -1,6 +1,7 @@
 """Opt-in --fast2: ScreenCaptureKit capture with the existing fast-mode inputs."""
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 
@@ -8,8 +9,12 @@ from .screen_capture import CaptureService
 from .ios_viewport import REFRESH_SECONDS, ViewportCache
 
 
+_NATIVE_ROTATE_SCRIPT = 'on run argv\n    set deviceName to item 1 of argv\n    set directionName to item 2 of argv\n\n    if directionName is "left" then\n        set menuLabel to "Rotate Left"\n    else\n        set menuLabel to "Rotate Right"\n    end if\n\n    tell application id "com.apple.iphonesimulator" to activate\n    tell application "System Events"\n        tell application process "Simulator"\n            set frontmost to true\n            set targetWindow to missing value\n            repeat with candidate in windows\n                try\n                    if (name of candidate as text) contains deviceName then\n                        set targetWindow to candidate\n                        exit repeat\n                    end if\n                end try\n            end repeat\n            if targetWindow is missing value then\n                error "Could not find Simulator window: " & deviceName\n            end if\n\n            perform action "AXRaise" of targetWindow\n            delay 0.20\n            click menu item menuLabel of menu 1 of menu bar item "Device" of menu bar 1\n        end tell\n    end tell\nend run'
+
+
 class IOSScreenCaptureBackend:
     name = "fast2 (ScreenCaptureKit + Quartz input)"
+    native_ios_rotation = True
     graceful_shutdown = True
 
     def __init__(self, service: CaptureService):
@@ -26,6 +31,40 @@ class IOSScreenCaptureBackend:
         # Discovery, live touch, taps, keys, text, home, rotation and appearance
         # remain exactly the Quartz backend's implementations.
         return getattr(self._input, name)
+
+    def rotate_native(self, udid):
+        """Use Simulator's Device menu; return its new landscape state or None.
+
+        Runs in the input executor, never on the asyncio event loop. The
+        window-orientation check guards against treating a successful
+        osascript exit as proof that the Simulator actually rotated.
+        """
+        window = self._input._find_window(udid)
+        if not window:
+            return None
+        was_landscape = window["width"] > window["height"]
+        # Left from portrait, right to return to portrait (not upside-down).
+        direction = "right" if was_landscape else "left"
+        try:
+            command = subprocess.run(
+                ["osascript", "-", window["name"], direction],
+                input=_NATIVE_ROTATE_SCRIPT,
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+            if command.returncode != 0:
+                return None
+            # Rotation is animated; wait briefly for real host geometry.
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                current = self._input._find_window(udid)
+                if current and ((current["width"] > current["height"]) != was_landscape):
+                    return not was_landscape
+                time.sleep(0.10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return None  # XCTest fallback if the menu did not rotate the window.
 
     def list_sims(self):
         # /api/sims can be polled frequently; do not scan Quartz/AX more than
@@ -85,6 +124,7 @@ class IOSScreenCaptureBackend:
 
 class AndroidScreenCaptureBackend(IOSScreenCaptureBackend):
     name = "Android (fast2 ScreenCaptureKit + Quartz touch + ADB controls)"
+    native_ios_rotation = False
 
     def __init__(self, service: CaptureService):
         from .backend_android_quartz import AndroidQuartzBackend

@@ -135,7 +135,10 @@ export class SimStream {
           } else if (msg.type === 'frame_heartbeat') {
             this.#lastFrameAt = Date.now();
           } else if (msg.type === 'rotated') {
-            this.#setOrientation(!this.#isLandscape);
+            // Native fast2 supplies the absolute orientation. Other modes
+            // retain the existing toggle behavior.
+            this.#setOrientation(typeof msg.landscape === 'boolean'
+              ? msg.landscape : !this.#isLandscape);
             this.#onRotateEnd(true);
           } else if (msg.type === 'rotate_failed') {
             this.#onRotateEnd(false);
