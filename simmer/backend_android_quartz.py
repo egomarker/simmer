@@ -18,7 +18,9 @@ from .quartz_jpeg import encode_jpeg
 class AndroidQuartzBackend(QuartzInputMixin, AdbBackend):
     name = "android (Quartz capture + Quartz touch + adb controls)"
 
-    def __init__(self) -> None:
+    def __init__(self, input_crop_top: float = 0) -> None:
+        # Only fast2 crops the titlebar; regular Quartz uses full-window input.
+        self._input_crop_top = input_crop_top
         # Serial -> (window ID, timestamp). Discovery is comparatively cheap,
         # but we avoid scanning windows for every frame.
         self._window_ids: dict[str, tuple[int, float]] = {}

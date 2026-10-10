@@ -5,8 +5,9 @@ import subprocess
 import threading
 import time
 
-from .screen_capture import CaptureService
+from .constants import ANDROID_FAST2_TITLEBAR_HEIGHT
 from .ios_viewport import REFRESH_SECONDS, ViewportCache
+from .screen_capture import CaptureService
 
 
 _NATIVE_ROTATE_SCRIPT = 'on run argv\n    set deviceName to item 1 of argv\n    set directionName to item 2 of argv\n\n    if directionName is "left" then\n        set menuLabel to "Rotate Left"\n    else\n        set menuLabel to "Rotate Right"\n    end if\n\n    tell application id "com.apple.iphonesimulator" to activate\n    tell application "System Events"\n        tell application process "Simulator"\n            set frontmost to true\n            set targetWindow to missing value\n            repeat with candidate in windows\n                try\n                    if (name of candidate as text) contains deviceName then\n                        set targetWindow to candidate\n                        exit repeat\n                    end if\n                end try\n            end repeat\n            if targetWindow is missing value then\n                error "Could not find Simulator window: " & deviceName\n            end if\n\n            perform action "AXRaise" of targetWindow\n            delay 0.20\n            click menu item menuLabel of menu 1 of menu bar item "Device" of menu bar 1\n        end tell\n    end tell\nend run'
@@ -126,10 +127,15 @@ class AndroidScreenCaptureBackend(IOSScreenCaptureBackend):
     name = "Android (fast2 ScreenCaptureKit + Quartz touch + ADB controls)"
     native_ios_rotation = False
 
-    def __init__(self, service: CaptureService):
+    def __init__(
+        self, service: CaptureService, *, titlebar_height: int = ANDROID_FAST2_TITLEBAR_HEIGHT
+    ):
         from .backend_android_quartz import AndroidQuartzBackend
 
-        self._input = AndroidQuartzBackend()
+        # Resolve once for both SCK capture and Quartz input. A future settings
+        # value can be passed as titlebar_height without changing either path.
+        self._titlebar_height = max(0, int(titlebar_height))
+        self._input = AndroidQuartzBackend(input_crop_top=self._titlebar_height)
         self._service = service
 
     def list_sims(self):
@@ -146,7 +152,7 @@ class AndroidScreenCaptureBackend(IOSScreenCaptureBackend):
         width = int(round(rect["width"]))
         height = int(round(rect["height"]))
 
-        titlebar = 28
+        titlebar = min(self._titlebar_height, height)
 
         return {
             "wid": self._input._window_id(udid),

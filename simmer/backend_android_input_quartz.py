@@ -30,10 +30,12 @@ def _mouse(kind: int, x: float, y: float) -> None:
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
 
 
-def _point(rect: dict, nx: float, ny: float) -> tuple[float, float]:
+def _point(rect: dict, nx: float, ny: float, crop_top: float = 0) -> tuple[float, float]:
+    """Map displayed image coordinates into the full macOS window bounds."""
+    crop_top = max(0.0, min(float(crop_top), rect["height"]))
     return (
         rect["x"] + _clamp(nx) * rect["width"],
-        rect["y"] + _clamp(ny) * rect["height"],
+        rect["y"] + crop_top + _clamp(ny) * (rect["height"] - crop_top),
     )
 
 
@@ -82,7 +84,7 @@ class QuartzInputMixin:
                 }
                 return
 
-            x, y = _point(rect, nx, ny)
+            x, y = _point(rect, nx, ny, self._input_crop_top)
             _mouse(Quartz.kCGEventLeftMouseDown, x, y)
             _TOUCHES[udid] = {
                 "mode": "quartz", "rect": rect,
@@ -98,7 +100,7 @@ class QuartzInputMixin:
             if state["mode"] == "adb":
                 state["last"] = (nx, ny)
                 return
-            x, y = _point(state["rect"], nx, ny)
+            x, y = _point(state["rect"], nx, ny, self._input_crop_top)
             if (x, y) != (state["x"], state["y"]):
                 _mouse(Quartz.kCGEventLeftMouseDragged, x, y)
                 state["x"], state["y"] = x, y
@@ -110,7 +112,7 @@ class QuartzInputMixin:
                 return
             nx, ny = _clamp(nx), _clamp(ny)
             if state["mode"] == "quartz":
-                x, y = _point(state["rect"], nx, ny)
+                x, y = _point(state["rect"], nx, ny, self._input_crop_top)
                 if (x, y) != (state["x"], state["y"]):
                     _mouse(Quartz.kCGEventLeftMouseDragged, x, y)
                 # Allow even a very fast click to register as a physical press.
