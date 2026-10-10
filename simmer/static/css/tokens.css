@@ -1,35 +1,33 @@
 :root {
-  /* Backgrounds — zinc dark (shadcn-inspired) */
-  --bg-base:     #09090b;
-  --bg-elevated: #18181b;
-  --bg-overlay:  #27272a;
-  --bg-active:   #3f3f46;
+  color-scheme: light;
+  --bg-base:     #f3f3f0;
+  --bg-elevated: #ffffff;
+  --bg-overlay:  #f0f0ec;
+  --bg-active:   #e6e7e1;
+  --bg-stage:    #f7f7f4;
+  --bg-sidebar:  #fafaf8;
 
-  /* Borders */
-  --border:        #27272a;
-  --border-subtle: #1f1f22;
-  --border-strong: #52525b;
+  --border:        #dedfd8;
+  --border-subtle: #e9eae4;
+  --border-strong: #afb3a7;
+  --text-primary:   #242923;
+  --text-secondary: #60675d;
+  --text-tertiary:  #646d5e;
 
-  /* Text */
-  --text-primary:   #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-tertiary:  #71717a;
+  /* Ember accent. Kept out of streamed pixels. */
+  --accent:       #b54825;
+  --accent-hover: #983a1c;
+  --accent-bg:    #faeae2;
+  --accent-border: #e7b8a4;
+  --on-accent:    #ffffff;
+  --success: #28704a;
+  --success-bg: #e5f2e9;
+  --warning: #916018;
+  --warning-bg: #fbf0d9;
+  --error:   #bc3c3c;
 
-  /* Accent — Apple system blue (dark mode) */
-  --accent:       #0a84ff;
-  --accent-hover: #2196ff;
-  --accent-bg:    rgba(10, 132, 255, 0.12);
-
-  /* Status */
-  --success: #30d158;
-  --warning: #ff9f0a;
-  --error:   #ff453a;
-
-  /* Typography */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
-
-  /* Spacing (8-pt grid) */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -37,29 +35,63 @@
   --sp-5: 20px;
   --sp-6: 24px;
   --sp-8: 32px;
-
-  /* Radii */
   --r-sm:  6px;
   --r-md:  10px;
   --r-lg:  14px;
   --r-xl:  20px;
   --r-pill: 999px;
 
-  /* Shadows */
-  --shadow-sm:     0 1px 3px rgba(0,0,0,0.5);
-  --shadow-md:     0 4px 16px rgba(0,0,0,0.4);
-  --shadow-lg:     0 8px 40px rgba(0,0,0,0.6);
-  --shadow-device: 0 24px 80px rgba(0,0,0,0.8), 0 4px 20px rgba(0,0,0,0.5);
-
-  /* Motion */
+  --shadow-sm:     0 1px 2px #24292306;
+  --shadow-md:     0 4px 16px #2429230a;
+  --shadow-lg:     0 12px 32px #24292314;
+  --shadow-device: 0 8px 24px #24292316, 0 1px 3px #24292320;
   --ease:     cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in:  cubic-bezier(0.4, 0, 1, 1);
   --dur-fast: 120ms;
-  --dur-mid:  200ms;
-  --dur-slow: 320ms;
+  --dur-mid:  180ms;
+  --dur-slow: 240ms;
+  --sidebar-width: 264px;
 
-  /* Updated by JS on mobile so controls stay above the software keyboard. */
   --visual-vh: 100dvh;
   --visual-top: 0px;
   --keyboard-inset: 0px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-base:     #161916;
+  --bg-elevated: #20241f;
+  --bg-overlay:  #2b3029;
+  --bg-active:   #373e34;
+  --bg-stage:    #1b1f1a;
+  --bg-sidebar:  #1c201b;
+  --border:        #373d33;
+  --border-subtle: #2c3229;
+  --border-strong: #616c59;
+  --text-primary:   #edf0e8;
+  --text-secondary: #b1baa7;
+  --text-tertiary:  #8f9a84;
+  --accent:        #f2a17c;
+  --accent-hover:  #ffb894;
+  --accent-bg:     #392c23;
+  --accent-border: #78543f;
+  --on-accent:     #281b13;
+  --success:    #8bd3a3;
+  --success-bg: #243c2c;
+  --warning:    #e6bd76;
+  --warning-bg: #3b3323;
+  --error:      #f2938d;
+  --shadow-sm:     0 1px 2px #00000014;
+  --shadow-md:     0 4px 16px #00000020;
+  --shadow-lg:     0 12px 32px #00000030;
+  --shadow-device: 0 8px 24px #00000040, 0 1px 3px #00000060;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-mid: 0ms; --dur-slow: 0ms; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }

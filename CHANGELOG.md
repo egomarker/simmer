@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Removed workspace and per-device heading rows to maximize simulator height on phones and tablets; moved the capture badge to the sidebar and retained the floating sidebar toggle and bottom controls.
+- Redesigned the workspace with warm neutral surfaces, an ember accent, top-aligned simulator views, compact controls, and a responsive device sidebar.
+- Added persisted Light / Dark / System workspace appearance, including terminal colors. Simulator appearance and streamed pixels remain independent.
+- Improved keyboard focus indicators, device-list buttons, reduced-motion handling, and accessible panel resizing; resizing a pair no longer displaces a third panel.
+- Kept the existing sidebar/multi-simulator/terminal workflow, capture and input protocols, and dependency-free frontend. No new UI libraries, web fonts, or backdrop filters.
+
 ## [0.5.1] - 2026-05-25
 
 ### Fixed

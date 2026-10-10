@@ -1,6 +1,9 @@
 import { fetchInfo, fetchSims, fetchAvailableDevices, bootSim, bootAvd, requestPermission } from './api.js';
 import { SimStream } from './stream.js';
 import { SimTerminal } from './terminal.js';
+import { initTheme } from './theme.js';
+
+initTheme();
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -93,6 +96,8 @@ function syncSidebarLayout() {
     app.classList.toggle('sidebar-collapsed', !desktopSidebarOpen);
   }
   const open = mobile ? app.classList.contains('sidebar-open') : desktopSidebarOpen;
+  $('sidebar').inert = !open;
+  $('sidebar').setAttribute('aria-hidden', String(!open));
   mobileMenuBtn.setAttribute('aria-expanded', String(open));
   mobileMenuBtn.setAttribute('aria-label', open ? 'Hide simulator list' : 'Show simulator list');
   mobileMenuBtn.title = open ? 'Hide simulator list' : 'Show simulator list';
@@ -120,7 +125,25 @@ mobileMenuBtn.addEventListener('click', () => {
 });
 sidebarBackdrop.addEventListener('click', closeMobileSidebar);
 window.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeMobileSidebar();
+  if (e.key === 'Escape') {
+    if (!addPopover.classList.contains('hidden')) { closeAddPopover(); return; }
+    if (isMobileViewport() && app.classList.contains('sidebar-open')) {
+      closeMobileSidebar();
+      mobileMenuBtn.focus();
+    }
+  }
+  if (e.key === 'Tab' && isMobileViewport() && app.classList.contains('sidebar-open')) {
+    const container = addPopover.classList.contains('hidden') ? $('sidebar') : addPopover;
+    const focusable = [...container.querySelectorAll('button, input, [tabindex="0"]')]
+      .filter(el => !el.disabled && el.getClientRects().length);
+    const first = focusable[0], last = focusable.at(-1);
+    if (!first) return;
+    if (e.shiftKey && (document.activeElement === first || !container.contains(document.activeElement))) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !container.contains(document.activeElement))) {
+      e.preventDefault(); first.focus();
+    }
+  }
 });
 window.addEventListener('resize', syncSidebarLayout);
 syncSidebarLayout();
@@ -133,18 +156,23 @@ function esc(s) {
 
 function simIcon(name) {
   const n = name.toLowerCase();
-  if (n.includes('ipad'))   return '⬛';
-  if (n.includes('watch'))  return '⌚';
-  if (n.includes('tv'))     return '📺';
-  if (n.includes('vision')) return '🥽';
-  if (n.includes('pixel') || n.includes('nexus') || n.includes('android') || n.includes('emulator')) return '🤖';
-  return '📱';
+  const shape = n.includes('ipad')
+    ? '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M10 18h4"/>'
+    : n.includes('watch')
+      ? '<rect x="6" y="6" width="12" height="12" rx="4"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4"/>'
+      : n.includes('tv')
+        ? '<rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8m-4-4v4"/>'
+        : n.includes('vision')
+          ? '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M8 11h1m6 0h1"/>'
+          : '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4m-3 14h2"/>';
+  return '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + shape + '</svg>';
 }
 
 function updateModeBadge(info) {
   if (!info.mode) return;
   const fast = info.mode.startsWith('fast');
-  modeBadge.textContent = fast ? 'fast' : 'compat';
+  modeBadge.textContent = fast ? (info.mode.includes('fast2') ? 'fast2' : 'fast') : 'compat';
+  modeBadge.title = `Capture mode: ${info.mode}`;
   modeBadge.className = 'mode-badge ' + (fast ? 'fast' : 'compat');
 }
 
@@ -232,11 +260,7 @@ async function loadSims() {
   if (cached?.sims) {
     allSims = cached.sims;
     hasAdb = cached.hasAdb ?? false;
-    if (cached.mode) {
-      const fast = cached.mode.startsWith('fast');
-      modeBadge.textContent = fast ? 'fast' : 'compat';
-      modeBadge.className = 'mode-badge ' + (fast ? 'fast' : 'compat');
-    }
+    if (cached.mode) updateModeBadge(cached);
     if (cached.bundleId) {
       projFilterWrap.classList.add('visible');
       projFilterWrap.querySelector('span').textContent =
@@ -275,9 +299,13 @@ async function loadSims() {
 let _addDevices = [];
 let _bootingIds = new Set();
 
+let addReturnFocus = null;
 function openAddPopover() {
+  addReturnFocus = document.activeElement;
+  setSidebarOpen(true);
   addPopover.classList.remove('hidden');
   addPopover.setAttribute('aria-hidden', 'false');
+  [...$('sidebar').children].forEach(el => { el.inert = el !== addPopover; });
   addSearch.value = '';
   addList.innerHTML = '<div class="add-list-empty">Loading…</div>';
   addSearch.focus();
@@ -294,6 +322,8 @@ function openAddPopover() {
 function closeAddPopover() {
   addPopover.classList.add('hidden');
   addPopover.setAttribute('aria-hidden', 'true');
+  [...$('sidebar').children].forEach(el => { el.inert = false; });
+  if (addReturnFocus?.isConnected) addReturnFocus.focus();
 }
 
 function renderAddList(query) {
@@ -392,11 +422,16 @@ async function handleAddBoot(id, name, platform, w, h) {
 }
 
 addSimBtn.addEventListener('click', openAddPopover);
+$('empty-add').addEventListener('click', openAddPopover);
 addCloseBtn.addEventListener('click', closeAddPopover);
 addSearch.addEventListener('input', () => renderAddList(addSearch.value));
-addPopover.addEventListener('keydown', e => { if (e.key === 'Escape') closeAddPopover(); });
+addPopover.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { e.stopPropagation(); closeAddPopover(); }
+});
 
 function renderDeviceList() {
+  updateWorkspaceSummary();
+  $('device-count').textContent = allSims.length;
   const filterOn = projFilter.checked;
   const sims = filterOn ? allSims.filter(s => s.project_app) : allSims;
   const adbHint = !hasAdb
@@ -421,19 +456,21 @@ function renderDeviceList() {
     return;
   }
   deviceList.innerHTML = bootingRows + sims.map(s => `
-    <div class="device-item${simPanels.has(s.id) ? ' active' : ''}"
+    <button type="button" class="device-item${simPanels.has(s.id) ? ' active' : ''}"
+        aria-pressed="${simPanels.has(s.id)}" title="${esc(s.name)}"
         data-udid="${esc(s.id)}" data-name="${esc(s.name)}"
         data-platform="${esc(s.platform)}"
         data-w="${s.width}" data-h="${s.height}">
       <span class="device-icon">${simIcon(s.name)}</span>
       <span class="device-info">
         <span class="device-name">${esc(s.name)}</span>
-        <span class="device-dims">${s.width && s.height ? `${s.width} × ${s.height}` : 'Android'}</span>
+        <span class="device-dims">${s.platform === 'android' ? 'Android' : 'iOS'} · ${s.width && s.height ? `${s.width} × ${s.height}` : 'Emulator'}</span>
       </span>
-      ${s.project_app ? '<span class="device-badge">★</span>' : ''}
-    </div>`).join('') + adbHint;
+      ${s.project_app ? '<span class="device-badge" title="Project app installed">★</span>' : ''}
+      ${simPanels.has(s.id) ? '<span class="device-open-indicator" aria-hidden="true"></span>' : ''}
+    </button>`).join('') + adbHint;
 
-  deviceList.querySelectorAll('.device-item').forEach(el => {
+  deviceList.querySelectorAll('button.device-item').forEach(el => {
     el.addEventListener('click', () =>
       toggleDevice(
         el.dataset.udid,
@@ -466,21 +503,31 @@ function addSimPanel(udid, name, w, h, platform) {
   panelEl.className = 'sim-panel';
   panelEl.dataset.udid = udid;
 
+  panelEl.setAttribute('role', 'group');
+  panelEl.setAttribute('aria-label', name);
+  panelEl.addEventListener('pointerdown', () => setFocusedPanel(udid));
+  panelEl.addEventListener('focusin', () => setFocusedPanel(udid));
+
+  const stageEl = document.createElement('div');
+  stageEl.className = 'sim-stage';
   const frameEl = document.createElement('div');
   frameEl.className = 'device-frame';
 
   const canvasEl = document.createElement('canvas');
   canvasEl.width  = Math.min(w, h);
   canvasEl.height = Math.max(w, h);
+  canvasEl.setAttribute('aria-label', name + ' live screen');
 
   const overlayEl = document.createElement('div');
   overlayEl.className = 'connect-overlay';
+  overlayEl.setAttribute('role', 'status');
   overlayEl.innerHTML = '<div class="spinner"></div><span>Connecting…</span>';
 
   frameEl.append(canvasEl, overlayEl);
 
-  const pillEl = createPill(udid);
-  panelEl.append(frameEl, pillEl);
+  const pillEl = createPill(udid, name);
+  stageEl.appendChild(frameEl);
+  panelEl.append(stageEl, pillEl);
 
   simPanelsEl.appendChild(panelEl);
   emptyState.classList.add('hidden');
@@ -489,8 +536,9 @@ function addSimPanel(udid, name, w, h, platform) {
   const dotEl = pillEl.querySelector('.status-dot');
   const statsEl = pillEl.querySelector('.stream-stats');
   const panel = {
-    stream: null, panelEl, frameEl, canvasEl,
+    stream: null, panelEl, stageEl, frameEl, canvasEl, name,
     overlayEl, pillEl, dotEl, statsEl,
+    statusEl: pillEl.querySelector('.panel-status'),
     platform,
     ro: null, appearMode: 'dark', twoFingerMode: false,
   };
@@ -500,7 +548,7 @@ function addSimPanel(udid, name, w, h, platform) {
 
   // ── ResizeObserver ──
   panel.ro = new ResizeObserver(() => sizeFrame(panel));
-  panel.ro.observe(panelEl);
+  panel.ro.observe(stageEl);
 
   // ── Stream ──
   panel.stream = new SimStream(udid, canvasEl, {
@@ -538,7 +586,11 @@ function removeSimPanel(udid, { silent = false } = {}) {
     if (focusedUdid) setFocusedPanel(focusedUdid);
   }
 
-  if (!simPanels.size) emptyState.classList.remove('hidden');
+  if (!simPanels.size) {
+    emptyState.classList.remove('hidden');
+    kbdBar.classList.remove('visible');
+  }
+  updateWorkspaceSummary();
   if (!silent) {
     renderDeviceList();
     saveSession();
@@ -558,12 +610,11 @@ function deviceCornerRadius(w, h) {
 }
 
 function sizeFrame(panel) {
-  const { panelEl, frameEl, canvasEl, platform } = panel;
-
-  const rect = panelEl.getBoundingClientRect();
-
-  const availW = Math.max(1, rect.width - 40);
-  const availH = Math.max(1, rect.height - 20 - (48 + 32));
+  const { stageEl, frameEl, canvasEl, platform } = panel;
+  if (!canvasEl.width || !canvasEl.height) return;
+  const style = getComputedStyle(stageEl);
+  const availW = Math.max(1, stageEl.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+  const availH = Math.max(1, stageEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
 
   const scale = Math.min(
     availW / canvasEl.width,
@@ -596,6 +647,12 @@ function rebuildDividers() {
   for (let i = 0; i < panels.length - 1; i++) {
     const divider = document.createElement('div');
     divider.className = 'sim-divider';
+    divider.tabIndex = 0;
+    divider.setAttribute('role', 'separator');
+    divider.setAttribute('aria-orientation', 'vertical');
+    divider.setAttribute('aria-label', 'Resize adjacent simulators');
+    divider.setAttribute('aria-valuemin', '0');
+    divider.setAttribute('aria-valuemax', '100');
     panels[i].insertAdjacentElement('afterend', divider);
     initDividerDrag(divider, panels[i], panels[i + 1]);
   }
@@ -605,33 +662,42 @@ function rebuildDividers() {
 
 function initDividerDrag(divider, leftEl, rightEl) {
   let startX, leftW, rightW;
-
+  const totalWidth = leftEl.clientWidth + rightEl.clientWidth;
+  divider.setAttribute('aria-valuenow', String(totalWidth ? Math.round(leftEl.clientWidth / totalWidth * 100) : 50));
+  function beginResize() {
+    // Pixel-weighted flex shares preserve other panels in 3+ device layouts.
+    const widths = [...simPanelsEl.querySelectorAll('.sim-panel')]
+      .map(el => [el, el.getBoundingClientRect().width]);
+    widths.forEach(([el, width]) => { el.style.flex = `${width} 1 0px`; });
+    leftW = leftEl.getBoundingClientRect().width;
+    rightW = rightEl.getBoundingClientRect().width;
+  }
+  function resizeBy(delta) {
+    const total = leftW + rightW;
+    const min = Math.min(260, total / 2);
+    const next = Math.max(min, Math.min(total - min, leftW + delta));
+    leftEl.style.flex = `${next} 1 0px`;
+    rightEl.style.flex = `${total - next} 1 0px`;
+    divider.setAttribute('aria-valuenow', String(Math.round(next / total * 100)));
+  }
   divider.addEventListener('pointerdown', e => {
     e.preventDefault();
     divider.setPointerCapture(e.pointerId);
     startX = e.clientX;
-    leftW  = leftEl.getBoundingClientRect().width;
-    rightW = rightEl.getBoundingClientRect().width;
-
+    beginResize();
     divider.addEventListener('pointermove', onMove);
-    divider.addEventListener('pointerup', onUp, { once: true });
   });
-
-  function onMove(e) {
-    const delta = e.clientX - startX;
-    const total = leftW + rightW;
-    const newLeft = Math.max(120, Math.min(total - 120, leftW + delta));
-    const pct = (newLeft / total * 100).toFixed(2);
-    leftEl.style.flex  = `0 0 ${pct}%`;
-    rightEl.style.flex = `0 0 ${(100 - parseFloat(pct)).toFixed(2)}%`;
-    const lu = leftEl.dataset.udid, ru = rightEl.dataset.udid;
-    if (simPanels.has(lu))  sizeFrame(simPanels.get(lu));
-    if (simPanels.has(ru))  sizeFrame(simPanels.get(ru));
-  }
-
-  function onUp() {
-    divider.removeEventListener('pointermove', onMove);
-  }
+  function onMove(e) { resizeBy(e.clientX - startX); }
+  function onEnd() { divider.removeEventListener('pointermove', onMove); }
+  divider.addEventListener('pointerup', onEnd);
+  divider.addEventListener('pointercancel', onEnd);
+  divider.addEventListener('lostpointercapture', onEnd);
+  divider.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    beginResize();
+    resizeBy(e.key === 'ArrowLeft' ? -24 : 24);
+  });
 }
 
 // ── Focus ─────────────────────────────────────────────────────────────────────
@@ -639,6 +705,13 @@ function setFocusedPanel(udid) {
   focusedUdid = udid;
   simPanels.forEach((p, id) =>
     p.panelEl.classList.toggle('focused', id === udid));
+  updateWorkspaceSummary();
+}
+
+function updateWorkspaceSummary() {
+  const name = simPanels.get(focusedUdid)?.name;
+  $('focus-summary').textContent = name ? `Controlling ${name}` : 'Select a device to start';
+  kbdInput.placeholder = name ? `Send text to ${name}…` : 'Type to send…';
 }
 
 // ── Per-panel status ──────────────────────────────────────────────────────────
@@ -646,6 +719,7 @@ function updatePanelStatus(udid, status) {
   const panel = simPanels.get(udid);
   if (!panel) return;
   const { dotEl, overlayEl } = panel;
+  panel.statusEl.textContent = ({ streaming: 'Live', connected: 'Ready', reconnecting: 'Reconnecting', 'no-frames': 'No frames' })[status] || 'Connecting';
   dotEl.className = 'status-dot';
   if (status === 'streaming' || status === 'connected') {
     dotEl.classList.add('connected');
@@ -711,13 +785,14 @@ function updateStreamVisibility() {
 }
 
 // ── Controls pill (per panel) ─────────────────────────────────────────────────
-function createPill(udid) {
+function createPill(udid, name) {
   const pill = document.createElement('div');
   pill.className = 'controls-pill';
   pill.innerHTML = `
-    <div class="status-dot"></div>
-    <div class="stream-stats" title="Stream stats">-- fps · -- KB/s</div>
-    <div class="pill-sep"></div>
+    <div class="panel-telemetry"><span class="status-dot"></span><span class="panel-status">Connecting</span>
+      <span class="stream-stats" title="Stream stats">— fps · — KB/s</span>
+    </div>
+    <div class="panel-actions" role="group" aria-label="Simulator controls">
     <button class="pill-btn" data-action="rotate" title="Rotate">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3.5 10a6.5 6.5 0 1 0 6.5-6.5H7"/><path d="M7 1.5v4H3"/>
@@ -728,7 +803,7 @@ function createPill(udid) {
         <path d="M3 9.5L10 3l7 6.5"/><path d="M5 8.5v8h3.5v-4h3v4H15v-8"/>
       </svg>
     </button>
-    <button class="pill-btn" data-action="appear" title="Switch to light">
+    <button class="pill-btn" data-action="appear" title="Switch simulator to light appearance">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
         <path d="M10 3.5a6.5 6.5 0 0 0 0 13A7.5 7.5 0 0 1 10 3.5z"/>
       </svg>
@@ -743,11 +818,13 @@ function createPill(udid) {
         <path d="M5 9h1M9 9h1M13 9h1M5 13h10"/>
       </svg>
     </button>
-    <button class="pill-btn" data-action="close" title="Close simulator">
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-        <path d="M5 5l10 10M15 5L5 15"/>
-      </svg>
-    </button>`;
+    <button class="pill-btn" data-action="close" title="Close ${esc(name)}">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+    </button>
+    </div>`;
+  pill.querySelector('.panel-telemetry').title = name;
+  pill.querySelector('.panel-actions').setAttribute('aria-label', name + ' controls');
+  pill.querySelectorAll('button').forEach(button => button.setAttribute('aria-label', button.title));
 
   pill.addEventListener('click', e => {
     const btn = e.target.closest('[data-action]');
@@ -758,6 +835,7 @@ function createPill(udid) {
     setFocusedPanel(udid);
 
     switch (action) {
+      case 'close': removeSimPanel(udid); break;
       case 'rotate': panel?.stream?.send({ type: 'rotate' }); break;
       case 'home':   panel?.stream?.send({ type: 'home' });   break;
       case 'appear': {
@@ -767,7 +845,8 @@ function createPill(udid) {
         btn.innerHTML = light
           ? `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.5"/><path d="M10 2.5v1.5M10 16v1.5M2.5 10H4M16 10h1.5M4.7 4.7l1 1M14.3 14.3l1 1M15.3 4.7l-1 1M5.7 14.3l-1 1"/></svg>`
           : `<svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.5a6.5 6.5 0 0 0 0 13A7.5 7.5 0 0 1 10 3.5z"/></svg>`;
-        btn.title = light ? 'Switch to dark' : 'Switch to light';
+        btn.title = light ? 'Switch simulator to dark appearance' : 'Switch simulator to light appearance';
+        btn.setAttribute('aria-label', btn.title);
         panel.stream?.send({ type: 'appearance', mode: panel.appearMode });
         break;
       }
@@ -788,7 +867,6 @@ function createPill(udid) {
         if (open) kbdInput.focus();
         break;
       }
-      case 'close': removeSimPanel(udid); break;
     }
   });
 
@@ -809,7 +887,7 @@ qualSlider.addEventListener('input', () => {
 });
 dsBtn.addEventListener('click', () => {
   const on = dsBtn.classList.toggle('active');
-  dsBtn.textContent = on ? 'Data Saver: On' : 'Data Saver';
+  dsBtn.setAttribute('aria-pressed', String(on));
   simPanels.forEach(p => p.stream?.updateSettings({ data_saver: on }));
   saveSession();
 });
@@ -831,11 +909,15 @@ $('kbd-ret').addEventListener('click', () => simPanels.get(focusedUdid)?.stream?
 
 // ── Terminal font size ────────────────────────────────────────────────────────
 const FONT_MIN = 9, FONT_MAX = 24;
-let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13');
+let termFontSize = 13;
+try {
+  const saved = parseInt(localStorage.getItem('termFontSize'));
+  if (Number.isFinite(saved)) termFontSize = Math.max(FONT_MIN, Math.min(FONT_MAX, saved));
+} catch {}
 
 function applyFontSize(size) {
   termFontSize = Math.max(FONT_MIN, Math.min(FONT_MAX, size));
-  localStorage.setItem('termFontSize', termFontSize);
+  try { localStorage.setItem('termFontSize', termFontSize); } catch {}
   $('font-size-val').textContent = termFontSize;
   termTabs.forEach(t => t.terminal.setFontSize(termFontSize));
 }
@@ -927,24 +1009,34 @@ function setTermOpen(open) {
   content.classList.toggle('terminal-open', open);
   app.classList.toggle('terminal-open', open);
   $('btn-terminal').classList.toggle('active', open);
+  $('btn-terminal').setAttribute('aria-expanded', String(open));
+  termPanel.inert = !open;
   updateViewportVars();
   updateStreamVisibility();
 
-  termPanel.classList.add('animating');
+  termPanel.classList.toggle('animating', !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   termPanel.classList.toggle('closed', !open);
-  termPanel.addEventListener('transitionend', () => {
-    termPanel.classList.remove('animating');
-    if (open) {
-      const active = termTabs.find(t => t.id === activeTermTabId);
-      updateViewportVars();
-      active?.terminal.fit();
-      active?.terminal.focus();
-    }
-  }, { once: true });
-
+  // Reduced-motion users have no transitionend; fit on the next frame too.
+  if (open) requestAnimationFrame(() => {
+    const active = termTabs.find(t => t.id === activeTermTabId);
+    active?.terminal.fit();
+    active?.terminal.focus();
+  });
   if (open && !termTabs.length) addTermTab();
   saveSession();
 }
+
+// One listener, rather than accumulating callbacks when transitions are disabled.
+termPanel.addEventListener('transitionend', event => {
+  if (event.target !== termPanel) return;
+  termPanel.classList.remove('animating');
+  if (termOpen) {
+    const active = termTabs.find(t => t.id === activeTermTabId);
+    updateViewportVars();
+    active?.terminal.fit();
+    active?.terminal.focus();
+  }
+});
 
 $('btn-terminal').addEventListener('click', () => setTermOpen(!termOpen));
 $('btn-close-term').addEventListener('click', () => {
@@ -1057,7 +1149,7 @@ loadSims().then(() => {
   if (s.quality) { qualSlider.value = s.quality;  qualVal.textContent = s.quality; }
   if (s.dataSaver) {
     dsBtn.classList.add('active');
-    dsBtn.textContent = 'Data Saver: On';
+    dsBtn.setAttribute('aria-pressed', 'true');
   }
 
   // Restore open simulator panels (only those still running). Phones only get one.

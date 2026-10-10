@@ -7,7 +7,7 @@
   transition: background var(--dur-fast);
   z-index: 1;
 }
-.term-resize-handle:hover  { background: rgba(10, 132, 255, 0.3); }
+.term-resize-handle:hover { background: var(--accent-border); }
 .term-resize-handle:active { background: var(--accent); }
 
 /* In pinned-right mode the panel is flex-row, so the handle becomes a
@@ -25,6 +25,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -36,7 +37,7 @@
   padding: 0 var(--sp-2) 0 var(--sp-3);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  min-height: 36px;
+  min-height: 42px;
   overflow: hidden;
 }
 
@@ -69,7 +70,7 @@
   user-select: none;
 }
 .term-tab:hover  { background: var(--bg-overlay); color: var(--text-secondary); }
-.term-tab.active { background: var(--bg-active); color: var(--text-primary); }
+.term-tab.active { background: var(--accent-bg); color: var(--accent); }
 
 .term-tab-close {
   background: none;
@@ -84,7 +85,7 @@
   flex-shrink: 0;
   transition: opacity var(--dur-fast), background var(--dur-fast);
 }
-.term-tab-close:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+.term-tab-close:hover { opacity: 1; background: var(--bg-active); }
 
 /* ── Drawer action buttons ── */
 .drawer-actions {

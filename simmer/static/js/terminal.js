@@ -1,3 +1,5 @@
+import { terminalTheme } from './theme.js';
+
 const CONNECT_TIMEOUT  = 8000;
 const RECONNECT_DELAY  = 1500;
 
@@ -6,6 +8,7 @@ export class SimTerminal {
   #connectTimer = null; #reconnectTimer = null;
   #sessionId = null; #closing = false;
   #onStatus;
+  #onThemeChange = () => { this.#term.options.theme = terminalTheme(); };
 
   constructor(el, { onStatus } = {}) {
     this.#onStatus = onStatus ?? (() => {});
@@ -18,26 +21,13 @@ export class SimTerminal {
       scrollback: 5000,
       scrollOnUserInput: false, // don't jump to bottom mid-scroll
       allowProposedApi: true,
-      theme: {
-        background:          '#18181b',
-        foreground:          '#fafafa',
-        cursor:              '#0a84ff',
-        cursorAccent:        '#18181b',
-        selectionBackground: 'rgba(10,132,255,0.25)',
-        black:   '#27272a', brightBlack:   '#52525b',
-        red:     '#ff453a', brightRed:     '#ff6961',
-        green:   '#30d158', brightGreen:   '#4cd964',
-        yellow:  '#ff9f0a', brightYellow:  '#ffcc02',
-        blue:    '#0a84ff', brightBlue:    '#409cff',
-        magenta: '#bf5af2', brightMagenta: '#da8fff',
-        cyan:    '#32ade6', brightCyan:    '#5ac8fa',
-        white:   '#a1a1aa', brightWhite:   '#fafafa',
-      },
+      theme: terminalTheme(),
     });
 
     this.#fitAddon = new FitAddon.FitAddon();
     this.#term.loadAddon(this.#fitAddon);
     this.#term.open(el);
+    window.addEventListener('simmer:themechange', this.#onThemeChange);
 
     this.#term.onData(d => {
       if (this.#ws?.readyState === WebSocket.OPEN) {
@@ -72,6 +62,7 @@ export class SimTerminal {
 
   destroy() {
     this.#closing = true;
+    window.removeEventListener('simmer:themechange', this.#onThemeChange);
     clearTimeout(this.#connectTimer);
     clearTimeout(this.#reconnectTimer);
     if (this.#ws) { this.#ws.onclose = null; this.#ws.close(); this.#ws = null; }

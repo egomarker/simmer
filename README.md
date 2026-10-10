@@ -34,6 +34,15 @@ I do most of my dev work SSHed into a Mac mini and I wanted a simple local way t
 - **Boot from sidebar** — start a shut-down simulator or AVD with a searchable `+` picker
 - **Session restore** — reopens your last layout on restart
 - **Remote-friendly** — streams over your LAN or Tailscale from any device
+- **Lightweight studio UI** — light, dark, and system themes; top-aligned simulator views and responsive sidebar, with no new frontend dependencies
+
+### Workspace appearance
+
+Choose **Light**, **Dark**, or **System** under **Appearance** in the sidebar. The preference is remembered in this browser; System follows your OS appearance automatically. The terminal follows the workspace theme too. This changes only Simmer's interface—not the streamed image or the simulator's own appearance (use its moon/sun control for that).
+
+Open multiple devices from **Your devices**, drag the separators to resize them, and use each panel's controls as before. Separators also support the Left/Right arrow keys when focused. On small screens the device list opens as a drawer. Use **+** in the sidebar to open the device library. The capture-mode badge lives beside the Simmer name in the sidebar. Simulator views start at the top with no workspace or device headings; the sidebar toggle floats over the top-left corner, and device controls (including Close) remain in the bottom footer.
+
+The interface uses system fonts, inline icons, and CSS color tokens: no new framework, web fonts, backdrop blur, or continuous decorative animation. Reduced-motion preferences are respected.
 
 ## Requirements
 
